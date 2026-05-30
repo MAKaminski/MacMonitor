@@ -188,6 +188,23 @@ Downloads the latest DMG, removes the quarantine flag, installs the privileged h
 
 > macOS may block the first launch because MacMonitor isn't notarised (no paid Apple Developer account needed to build or distribute it). The `Install.command` script handles this automatically. After the first approved launch, macOS never asks again.
 
+### First launch on macOS Sequoia or later — "Move to Trash / Cancel"
+
+On macOS 15 Sequoia and later, the first-launch Gatekeeper dialog only shows **Move to Trash** and **Cancel** — no "Open Anyway" button in the popup itself. This is expected for any app not notarised through a paid Apple Developer account, MacMonitor included.
+
+To allow MacMonitor:
+
+1. Click **Cancel** on the popup (do **not** click Move to Trash).
+2. Open **System Settings → Privacy & Security**.
+3. Scroll **all the way down** in the right-hand pane — past every privacy section, past *Allow applications downloaded from*, to the very bottom.
+4. You'll see *"Macmonitor" was blocked to protect your Mac.* with an **Open Anyway** button next to it. Click it.
+5. Authenticate with Touch ID or your Mac password.
+6. A second dialog appears — click **Open**. MacMonitor launches and the menu bar icon appears.
+
+You only do this once per machine. macOS remembers the decision.
+
+For a full walkthrough with troubleshooting, see **[INSTALL.md](./INSTALL.md)**.
+
 ---
 
 ## Building from Source
