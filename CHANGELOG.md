@@ -7,6 +7,37 @@ Dates: ISO 8601 (YYYY-MM-DD)
 
 ---
 
+## [2.0.2] — 2026-05-30
+
+### The "Brew Install Actually Works" Release
+
+A point release that fixes the Homebrew Cask installation failure reported in
+[#4](https://github.com/ryyansafar/MacMonitor/issues/4), plus three contributor
+fixes for Apple Silicon hardware detection on newer chips.
+
+### Fixed
+
+- **Homebrew install no longer fails with `macmonitor-helper: No such file or directory`** —
+  the privileged helper sources existed at `helper/macmonitor-helper.m` but were never
+  compiled or bundled. The Cask `postflight` tried to `cp` a binary that the released DMG
+  did not contain. `scripts/build-dmg.sh` now compiles `macmonitor-helper` from source and
+  embeds it in `Macmonitor.app/Contents/MacOS/` before the DMG is sealed, so `brew install
+  --cask macmonitor` completes cleanly. Fixes [#4](https://github.com/ryyansafar/MacMonitor/issues/4).
+- **Per-core CPU labels (`C10`–`C17`) no longer wrap to two lines** — widened the label
+  column from 16 to 22 pt with `.lineLimit(1)` + `.fixedSize(...)` so two-digit core indices
+  stay on one row. ([#5](https://github.com/ryyansafar/MacMonitor/pull/5), thanks @daricliu)
+- **GPU core count detection on M5+ Macs** — `ioreg -rc AGXAcceleratorG14` was hardcoded,
+  so newer chips reported 0 GPU cores. Now iterates `AGXAccelerator{G17X,G17,…,G14}` and
+  falls back to `system_profiler SPDisplaysDataType`. Verified on M5 Max (40 GPU cores via
+  `AGXAcceleratorG17X`). ([#6](https://github.com/ryyansafar/MacMonitor/pull/6), thanks @daricliu)
+- **Disk I/O showing 0 KB/s when first IOBlockStorageDriver had zero counters** —
+  `diskCumulative()` used `firstIntegerMatch` which grabbed only the first `"Bytes (Read)"`
+  occurrence. Now sums all `IOBlockStorageDriver` statistics lines and explicitly excludes
+  child `IOMedia`/APFS entries so traffic isn't double-counted.
+  ([#8](https://github.com/ryyansafar/MacMonitor/pull/8), thanks @daricliu)
+
+---
+
 ## [2.0.1] — 2026-05-13
 
 ### The "Temperatures Actually Work" Release

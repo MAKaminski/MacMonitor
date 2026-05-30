@@ -90,6 +90,26 @@ APP_PATH=$(find "$EXPORT"   -name "*.app" -maxdepth 2 | head -1)
 [ -z "$APP_PATH" ] && fail "Could not find exported .app"
 ok "Exported: $(basename "$APP_PATH")"
 
+# ── Build privileged helper and embed it in the app bundle ───────────────────
+# The Homebrew Cask postflight copies this binary out of Contents/MacOS/ into
+# /Users/Shared/MacMonitor and grants it passwordless sudo for SMC + IOReport
+# reads. If it's missing, brew install --cask macmonitor fails with
+#   cp: ...Macmonitor.app/Contents/MacOS/macmonitor-helper: No such file
+# (see issue #4). Compile from helper/ and drop the binary in alongside the app.
+step "Building macmonitor-helper..."
+HELPER_OUT="$APP_PATH/Contents/MacOS/macmonitor-helper"
+clang -fobjc-arc \
+    -framework Foundation -framework IOKit \
+    -F/System/Library/PrivateFrameworks -lIOReport \
+    -I Macmonitor \
+    helper/macmonitor-helper.m \
+    Macmonitor/IOReportWrapper.m \
+    Macmonitor/SMC.c \
+    -o "$HELPER_OUT"
+chmod +x "$HELPER_OUT"
+[ -x "$HELPER_OUT" ] || fail "Helper compile failed — see clang output above"
+ok "Helper embedded: $(basename "$HELPER_OUT")"
+
 # ── Remove quarantine ─────────────────────────────────────────────────────────
 step "Removing quarantine flag..."
 xattr -rd com.apple.quarantine "$APP_PATH" 2>/dev/null || true
