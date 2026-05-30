@@ -318,8 +318,16 @@ class SystemStatsModel: ObservableObject {
 
     private func diskCumulative() -> (readBytes: Int64, writeBytes: Int64) {
         let output = shell("/usr/sbin/ioreg", ["-r", "-c", "IOBlockStorageDriver", "-l"])
-        let read = Self.firstIntegerMatch(in: output, pattern: #""Bytes \(Read\)"\s*=\s*(\d+)"#)
-        let write = Self.firstIntegerMatch(in: output, pattern: #""Bytes \(Write\)"\s*=\s*(\d+)"#)
+        var read: Int64 = 0
+        var write: Int64 = 0
+
+        for linePart in output.split(separator: "\n") {
+            let line = String(linePart)
+            guard Self.isIOBlockStorageDriverStatsLine(line) else { continue }
+            read += Self.firstIntegerMatch(in: line, pattern: #""Bytes \(Read\)"\s*=\s*(\d+)"#)
+            write += Self.firstIntegerMatch(in: line, pattern: #""Bytes \(Write\)"\s*=\s*(\d+)"#)
+        }
+
         return (read, write)
     }
 
@@ -753,6 +761,16 @@ private extension SystemStatsModel {
         let match = String(text[range])
         let digits = match.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         return Int64(digits) ?? 0
+    }
+
+    static func isIOBlockStorageDriverStatsLine(_ line: String) -> Bool {
+        guard line.contains(#""Statistics""#), line.contains(#""Bytes ("#) else { return false }
+
+        // `ioreg -r -c IOBlockStorageDriver -l` includes each driver and its child media
+        // tree. Count only the driver's own Statistics line; child IOMedia/APFS
+        // Statistics repeat the same traffic and would double-count.
+        return line.hasPrefix(#"      "Statistics" = "#)
+            || line.hasPrefix(#"  |   "Statistics" = "#)
     }
 
     static func detectGPUCoreCount() -> Int {
