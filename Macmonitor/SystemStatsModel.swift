@@ -756,7 +756,30 @@ private extension SystemStatsModel {
     }
 
     static func detectGPUCoreCount() -> Int {
-        let output = shellStatic("/usr/sbin/ioreg", ["-rc", "AGXAcceleratorG14", "-l"])
+        let acceleratorClasses = [
+            "AGXAccelerator",
+            "AGXAcceleratorG17X",
+            "AGXAcceleratorG17",
+            "AGXAcceleratorG16X",
+            "AGXAcceleratorG16",
+            "AGXAcceleratorG15X",
+            "AGXAcceleratorG15",
+            "AGXAcceleratorG14X",
+            "AGXAcceleratorG14",
+        ]
+
+        for className in acceleratorClasses {
+            let output = shellStatic("/usr/sbin/ioreg", ["-r", "-c", className, "-l"])
+            let cores = parseGPUCoreCount(from: output)
+            if cores > 0 { return cores }
+        }
+
+        let profiler = shellStatic("/usr/sbin/system_profiler", ["SPDisplaysDataType"])
+        let profilerCores = firstIntegerMatch(in: profiler, pattern: #"Total Number of Cores:\s*(\d+)"#)
+        return Int(profilerCores)
+    }
+
+    static func parseGPUCoreCount(from output: String) -> Int {
         let direct = firstIntegerMatch(in: output, pattern: #""gpu-core-count"\s*=\s*(\d+)"#)
         if direct > 0 { return Int(direct) }
 
