@@ -611,8 +611,12 @@ private struct CoreTile: View {
     }
     var body: some View {
         HStack(spacing: 5) {
-            Text("C\(index)").font(.system(size: 9, design: .monospaced))
-                .foregroundColor(color.opacity(0.7)).frame(width: 16)
+            Text("C\(index)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(color.opacity(0.7))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 22, alignment: .leading)
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.06))
@@ -622,8 +626,12 @@ private struct CoreTile: View {
                 }
             }
             .frame(height: 5)
-            Text("\(Int(pct))%").font(.system(size: 9, design: .monospaced))
-                .foregroundColor(Color(hex:"666680")).frame(width: 26, alignment: .trailing)
+            Text("\(Int(pct))%")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(Color(hex:"666680"))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 26, alignment: .trailing)
         }
     }
 }
