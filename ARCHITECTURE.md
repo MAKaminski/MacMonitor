@@ -39,7 +39,7 @@ flowchart LR
 | `Macmonitor.app` | Long-running menu-bar app | User | Menu-bar indicator + full dashboard popover. Owns `SystemStatsModel`. |
 | `macmonitor-helper` | Spawned per sample, exits | Root (one-time admin approval) | Reads IOReport/SMC/HID for GPU %, temperatures, fan RPM, power rails, DRAM bandwidth. |
 | `MacMonitorWidgetExtension.appex` | Spawned by WidgetKit per timeline refresh | User (standalone) | Desktop widget. Samples its own data in-process — works with the app closed. |
-| Desktop HUD (`DesktopHUDView`, in AppDelegate.swift) | Inside the app process | User | Borderless panel pinned at desktop-icon window level. Subscribes to the same 0.5 s `@Published` stream — the WidgetKit refresh workaround. Toggle via right-click menu; position persisted. |
+| Desktop HUD (`AdaptiveHUDView` + `DesktopHUDView`, in AppDelegate.swift) | Inside the app process | User | Resizable borderless panel (`HUDPanel`, key-capable for text input) at desktop window level, fed by the same 0.5 s `@Published` stream. v2.2 control center: breakpoint layout, DASH/FILES tabs, embedded zsh console (splittable ≤4 panes), launcher tile grid, position lock, device-aware default sizing clamped above the Dock. |
 
 ## Sampling design — two cadences, push-based
 
@@ -87,6 +87,25 @@ policy), and the **Desktop HUD** — an app-rendered floating panel at desktop w
 that updates at the full 0.5 s stream rate, since it lives inside the app process where
 WidgetKit's throttle doesn't apply.
 
+### HUD control center (v2.2)
+
+The Full HUD hosts `AdaptiveHUDView` in a resizable `HUDPanel` (an `NSPanel` subclass that
+can become key, so text input works in a nonactivating desktop panel; the hosting
+controller's `sizingOptions` are empty so the window owns its size). Layout re-flows by
+breakpoint: width ≥980 → 4 columns (adds GPU/power rails), ≥700 → 3, else 2; aspect taller
+than 1:1.3 → stacked vertical. Defaults are device-aware — sized from the display's
+`visibleFrame` (which excludes the menu bar and Dock) and parked bottom-right above the
+Dock; restored frames pass a sanity guard that resets degenerate (zero-height) frames and
+clamps everything into the visible area. A lock toggle (`hudLocked`) freezes position and
+size. Tabs switch between the dashboard and a FileManager-backed directory explorer. The
+embedded terminal runs each command via `Process` (`/bin/zsh -lc`) with streamed
+stdout/stderr and `cd`/`clear` built-ins, splittable to 4 panes — a command console, not a
+full TTY (a terminal-emulator dependency like SwiftTerm is the upgrade path). Launcher
+tiles persist as JSON in `UserDefaults` (`LauncherStore`); volume buttons drive AppleScript
+`set volume output volume`. One design note: everything lives in `AppDelegate.swift` by
+choice — adding source files to the Xcode target would require pbxproj edits, which this
+fork's CLI-driven workflow avoids.
+
 ## Release & distribution pipeline
 
 ```mermaid
@@ -116,7 +135,7 @@ flowchart LR
 | Path | What |
 |---|---|
 | `Macmonitor/SystemStatsModel.swift` | All app-side sampling; two-cadence timer logic |
-| `Macmonitor/AppDelegate.swift` | Menu-bar item + popover |
+| `Macmonitor/AppDelegate.swift` | Menu-bar item + popover + the entire HUD control center (adaptive layout, tabs, terminal, files, launcher, lock) |
 | `MacMonitorWidget/MacMonitorWidget.swift` | Widget provider + Small/Medium/Large views (no `@main`) |
 | `MacMonitorWidget/MacMonitorWidgetBundle.swift` | Widget `@main` entry point |
 | `helper/macmonitor-helper.m` | Root helper (IOReport/SMC/HID sampling) |

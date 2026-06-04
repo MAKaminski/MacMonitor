@@ -22,6 +22,7 @@ the widget, and cloning + building upstream produces the menu-bar app only.
 | Widget data collection | — | Self-contained in-process sampling: per-core CPU, MEM/swap, network, battery, thermal |
 | Dashboard refresh | 2 s tick | 0.5 s kernel-metric stream (`@Published` push); root-helper sensors stay at 2 s |
 | Menu-bar app | v2.x | Otherwise unchanged |
+| Desktop HUD | — | Adaptive control center: resizable breakpoint layout, DASH/FILES tabs, embedded zsh terminal (splittable), launcher tile grid, position lock, device-aware sizing that clears the Dock |
 | Install paths | DMG + brew + script | Same, plus an **MCP server** so AI agents can install it directly |
 
 ## Install
@@ -65,15 +66,32 @@ Tools: `install_macmonitor` · `macmonitor_status` · `uninstall_macmonitor`. De
 Widgets are rendered snapshots — WidgetKit cold-starts the extension per refresh and
 throttles reloads, so ~5 s is the platform ceiling (the app nudges WidgetKit every 5 s to
 keep the widget at that ceiling). For true sub-second numbers on your desktop, use the
-**Desktop HUD**: right-click the menu-bar icon → *Show Desktop HUD*. It comes in two styles —
-**Full** (default: the entire performance overview — clusters, per-core, GPU, fan, memory,
-battery, network, disk, power rails, top processes) and **Compact** — and is rendered by the
-app itself from the 0.5 s stream. Drag it anywhere; position and style are remembered.
+**Desktop HUD**: right-click the menu-bar icon → *Show Desktop HUD*.
+
+## The Desktop HUD (v2.2 control center)
+
+The Full HUD is a **resizable desktop control center** rendered by the app from the 0.5 s
+stream. Drag any edge to resize — the layout re-flows by breakpoint (≥980 px wide → 4
+columns including GPU/power rails, ≥700 → 3, narrower → 2; taller than wide → stacked). It
+defaults to a horizontal bar sized to your display's visible area, parked bottom-right
+**above the Dock**, and restored frames are clamped so they can never hide off-screen or
+under the Dock.
+
+- **DASH | FILES tabs** — performance overview, or a click-to-navigate directory explorer
+  (folders descend, files open in their default app, Reveal in Finder).
+- **Embedded terminal** (bottom-right) — zsh console with streamed output, `cd`/`clear`
+  built-ins, splittable up to 4 panes. (Command console, not a full TTY — no vim/htop.)
+- **Launcher** (bottom-left) — deckboard-style tile grid; defaults M1 / Monarch / Schwab /
+  Gmail, add your own via the **+** editor, right-click a tile to remove, plus system
+  **Vol −/+** controls.
+- **Lock** — right-click the HUD → *Lock HUD* to freeze position and size.
+- A **Compact** style (small CPU/MEM card) is available via the right-click menu; position
+  and style persist per style.
 
 The HUD is **independent of the menu bar**: choose *Hide Menu Bar Icon (HUD keeps running)*
 to run HUD-only. Right-click the HUD itself for its controls (show menu icon, switch style,
-hide, quit) — the app guarantees at least one surface is always visible. Full rationale:
-[ARCHITECTURE.md](ARCHITECTURE.md).
+lock, hide, quit) — the app guarantees at least one surface is always visible. Full
+rationale: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Architecture
 
