@@ -223,7 +223,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
         let size  = style == "compact" ? NSSize(width: 280, height: 170)
                                        : NSSize(width: 760, height: 300)   // default: horizontal bar
-        let panel = NSPanel(
+        let panel = HUDPanel(
             contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
             styleMask:   [.borderless, .nonactivatingPanel, .resizable],
             backing:     .buffered,
@@ -234,7 +234,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque                    = false
         panel.backgroundColor             = .clear
         panel.hasShadow                   = true
-        panel.isMovableByWindowBackground = true
+        let hudLocked = UserDefaults.standard.bool(forKey: "hudLocked")
+        panel.isMovableByWindowBackground = !hudLocked
+        if hudLocked { panel.styleMask.remove(.resizable) }
         panel.hidesOnDeactivate           = false
         panel.becomesKeyOnlyIfNeeded      = true
         if style == "compact" {
@@ -257,9 +259,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentMinSize = NSSize(width: 420, height: 200)
         }
         if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
+            // Device-aware defaults: sized from THIS display's visibleFrame,
+            // which already excludes the menu bar and the Dock (the ribbon).
             let f = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: f.maxX - size.width - 20,
-                                         y: f.maxY - size.height - 20))
+            if style == "compact" {
+                panel.setFrameOrigin(NSPoint(x: f.maxX - size.width - 20,
+                                             y: f.maxY - size.height - 20))
+            } else {
+                let w = min(max(f.width  * 0.62, 760), f.width  - 32)
+                let h = min(max(f.height * 0.42, 320), f.height - 32)
+                panel.setFrame(NSRect(x: f.maxX - w - 16, y: f.minY + 16,
+                                      width: w, height: h), display: true)
+            }
         }
         // Sanity guard: a saved frame can be degenerate (zero height) or
         // stranded on a display that is no longer attached — reset it.
@@ -272,6 +283,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                       width: size.width, height: size.height),
                                display: true)
             }
+        }
+        if let scr = NSScreen.main {
+            let vf = scr.visibleFrame
+            var fr = panel.frame
+            if fr.minY < vf.minY { fr.origin.y = vf.minY + 8 }            // above the Dock
+            if fr.maxY > vf.maxY { fr.origin.y = vf.maxY - fr.height - 8 }
+            if fr.maxX > vf.maxX { fr.origin.x = vf.maxX - fr.width - 8 }
+            if fr.minX < vf.minX { fr.origin.x = vf.minX + 8 }
+            panel.setFrame(fr, display: true)
         }
         panel.setFrameAutosaveName("MacMonitorHUD-\(style)")
         panel.orderFrontRegardless()
@@ -286,6 +306,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Launcher (Deckboard replacement) actions
 
     var launcherEditor: NSWindow?
+
+    @objc func toggleHUDLock() {
+        let locked = !UserDefaults.standard.bool(forKey: "hudLocked")
+        UserDefaults.standard.set(locked, forKey: "hudLocked")
+        if let p = hudWindow {
+            p.isMovableByWindowBackground = !locked
+            if locked { p.styleMask.remove(.resizable) }
+            else      { p.styleMask.insert(.resizable) }
+        }
+    }
 
     func adjustVolume(by delta: Int) {
         let op = delta >= 0 ? "+" : "-"
@@ -401,6 +431,9 @@ struct HUDMenuItems: View {
             Button("Show Menu Bar Icon") { AppDelegate.shared?.showMenuBarIcon() }
             Button("Switch HUD Style (Full ↔ Compact)") { AppDelegate.shared?.toggleHUDStyle() }
             Button("Hide Desktop HUD") { AppDelegate.shared?.toggleHUD() }
+            Button(UserDefaults.standard.bool(forKey: "hudLocked")
+                   ? "Unlock HUD (allow move/resize)"
+                   : "Lock HUD (fix position & size)") { AppDelegate.shared?.toggleHUDLock() }
             Divider()
             Button("Quit MacMonitor") { NSApp.terminate(nil) }
         }
@@ -435,13 +468,17 @@ private func hudThermColor(_ s: String) -> Color {
 
 struct AdaptiveHUDView: View {
     @ObservedObject var model: SystemStatsModel
+    @AppStorage("hudTab") private var tab = "dash"
 
     var body: some View {
         GeometryReader { g in
             let wide = g.size.width > g.size.height * 1.3
             let cols = g.size.width >= 980 ? 4 : (g.size.width >= 700 ? 3 : 2)
             VStack(alignment: .leading, spacing: 8) {
-                HUDHeader(model: model)
+                HUDHeader(model: model, tab: $tab)
+                if tab == "files" {
+                    HUDFilesView()
+                } else {
                 if wide {
                     HStack(alignment: .top, spacing: 16) {
                         HUDCPUSection(model: model)
@@ -474,7 +511,18 @@ struct AdaptiveHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                HUDLauncherSection()
+                if wide {
+                    HStack(alignment: .bottom, spacing: 16) {
+                        HUDLauncherSection()
+                            .frame(width: 300, alignment: .bottomLeading)
+                        HUDTerminalSection()
+                            .frame(maxWidth: .infinity, minHeight: 110)
+                    }
+                } else {
+                    HUDTerminalSection().frame(minHeight: 110)
+                    HUDLauncherSection()
+                }
+                }
             }
             .padding(12)
             .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
@@ -485,6 +533,7 @@ struct AdaptiveHUDView: View {
 
 struct HUDHeader: View {
     @ObservedObject var model: SystemStatsModel
+    @Binding var tab: String
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(hudThermColor(model.thermalState)).frame(width: 8, height: 8)
@@ -495,9 +544,28 @@ struct HUDHeader: View {
                     .font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
             }
             Spacer()
+            HUDTabButton(label: "DASH",  id: "dash",  tab: $tab)
+            HUDTabButton(label: "FILES", id: "files", tab: $tab)
             Text(hudFmtW(model.totalPower))
                 .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
         }
+    }
+}
+
+struct HUDTabButton: View {
+    let label: String
+    let id:    String
+    @Binding var tab: String
+    var body: some View {
+        Button { tab = id } label: {
+            Text(label)
+                .font(.system(size: 8, weight: .bold)).tracking(1)
+                .foregroundColor(tab == id ? .black : .gray)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5)
+                    .fill(tab == id ? Color.white.opacity(0.85) : Color.gray.opacity(0.2)))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -515,7 +583,7 @@ struct HUDBar: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
-                .frame(width: 46, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.gray.opacity(0.15))
@@ -816,5 +884,218 @@ struct LauncherEditorView: View {
         }
         .padding(16)
         .frame(width: 480, height: 320)
+    }
+}
+
+
+// MARK: - Key-capable desktop panel (text input in a nonactivating panel)
+
+final class HUDPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+// MARK: - Embedded terminal (zsh console; splittable up to 4 panes)
+
+final class TerminalSession: ObservableObject, Identifiable {
+    let id = UUID()
+    @Published var log = ""
+    @Published var cwd = NSHomeDirectory()
+    @Published var running = false
+
+    func run(_ cmd: String) {
+        let trimmed = cmd.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !running else { return }
+        append("% " + trimmed + "\n")
+        if trimmed == "clear" { log = ""; return }
+        if trimmed == "cd" || trimmed.hasPrefix("cd ") {
+            changeDir(String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces))
+            return
+        }
+        running = true
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-lc", trimmed]
+        p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError  = pipe
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self?.append(s) }
+        }
+        p.terminationHandler = { _ in
+            pipe.fileHandleForReading.readabilityHandler = nil
+            DispatchQueue.main.async { [weak self] in self?.running = false }
+        }
+        do { try p.run() } catch {
+            append("error: \(error.localizedDescription)\n")
+            running = false
+        }
+    }
+
+    private func changeDir(_ arg: String) {
+        let home = NSHomeDirectory()
+        var target = home
+        if arg.isEmpty || arg == "~"      { target = home }
+        else if arg.hasPrefix("~/")       { target = home + "/" + arg.dropFirst(2) }
+        else if arg.hasPrefix("/")        { target = arg }
+        else                              { target = cwd + "/" + arg }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: target, isDirectory: &isDir), isDir.boolValue {
+            cwd = (target as NSString).standardizingPath
+        } else {
+            append("cd: no such directory: \(arg)\n")
+        }
+    }
+
+    private func append(_ s: String) {
+        log += s
+        if log.count > 40_000 { log = String(log.suffix(30_000)) }
+    }
+}
+
+final class TerminalHub: ObservableObject {
+    static let shared = TerminalHub()
+    @Published var sessions: [TerminalSession] = [TerminalSession()]
+    func addPane() { if sessions.count < 4 { sessions.append(TerminalSession()) } }
+    func remove(_ s: TerminalSession) { if sessions.count > 1 { sessions.removeAll { $0.id == s.id } } }
+}
+
+struct HUDTerminalSection: View {
+    @ObservedObject var hub = TerminalHub.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                HUDSectionTitle(t: "TERMINAL")
+                Spacer()
+                Button(action: { hub.addPane() }) {
+                    Text("+ Split").font(.system(size: 9)).foregroundColor(.gray)
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(spacing: 8) {
+                ForEach(hub.sessions) { s in
+                    TerminalPaneView(session: s).frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+}
+
+struct TerminalPaneView: View {
+    @ObservedObject var session: TerminalSession
+    @State private var input = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(session.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 8, design: .monospaced)).foregroundColor(.gray).lineLimit(1)
+                Spacer()
+                if session.running {
+                    Text("⋯").font(.system(size: 9)).foregroundColor(.yellow)
+                }
+                Button(action: { TerminalHub.shared.remove(session) }) {
+                    Text("×").font(.system(size: 10)).foregroundColor(.gray)
+                }
+                .buttonStyle(.plain)
+            }
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    Text(session.log.isEmpty ? "zsh — type a command below" : session.log)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.green)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(5)
+                        .id("END")
+                }
+                .onChange(of: session.log) { _ in proxy.scrollTo("END", anchor: .bottom) }
+            }
+            .background(Color.black.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            TextField("command…", text: $input)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white)
+                .padding(5)
+                .background(Color.black.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onSubmit {
+                    session.run(input)
+                    input = ""
+                }
+        }
+    }
+}
+
+// MARK: - Files tab (directory explorer)
+
+struct HUDFilesView: View {
+    @State private var path = NSHomeDirectory()
+    @State private var entries: [FileEntry] = []
+
+    struct FileEntry: Identifiable {
+        let id = UUID()
+        let name:  String
+        let isDir: Bool
+        let path:  String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Button(action: { path = NSHomeDirectory(); load() }) {
+                    Text("⌂").font(.system(size: 12)).foregroundColor(.cyan)
+                }
+                .buttonStyle(.plain)
+                Button(action: { path = (path as NSString).deletingLastPathComponent; load() }) {
+                    Text("↑").font(.system(size: 12)).foregroundColor(.cyan)
+                }
+                .buttonStyle(.plain)
+                Text(path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray).lineLimit(1)
+                Spacer()
+                Button(action: { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) }) {
+                    Text("Reveal in Finder").font(.system(size: 9)).foregroundColor(.cyan)
+                }
+                .buttonStyle(.plain)
+            }
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)],
+                          alignment: .leading, spacing: 3) {
+                    ForEach(entries) { e in
+                        HStack(spacing: 5) {
+                            Image(systemName: e.isDir ? "folder.fill" : "doc")
+                                .font(.system(size: 10))
+                                .foregroundColor(e.isDir ? .cyan : .gray)
+                            Text(e.name).font(.system(size: 10)).foregroundColor(.white).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if e.isDir { path = e.path; load() }
+                            else { NSWorkspace.shared.open(URL(fileURLWithPath: e.path)) }
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: path)) ?? []
+        var dirs:  [FileEntry] = []
+        var files: [FileEntry] = []
+        for n in names.sorted(by: { $0.lowercased() < $1.lowercased() }) where !n.hasPrefix(".") {
+            var d: ObjCBool = false
+            let p = path + "/" + n
+            fm.fileExists(atPath: p, isDirectory: &d)
+            if d.boolValue { dirs.append(FileEntry(name: n, isDir: true,  path: p)) }
+            else           { files.append(FileEntry(name: n, isDir: false, path: p)) }
+        }
+        entries = dirs + files
     }
 }
