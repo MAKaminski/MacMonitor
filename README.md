@@ -65,9 +65,15 @@ Tools: `install_macmonitor` · `macmonitor_status` · `uninstall_macmonitor`. De
 Widgets are rendered snapshots — WidgetKit cold-starts the extension per refresh and
 throttles reloads, so ~5 s is the platform ceiling (the app nudges WidgetKit every 5 s to
 keep the widget at that ceiling). For true sub-second numbers on your desktop, use the
-**Desktop HUD**: right-click the menu-bar icon → *Show Desktop HUD*. It looks like a widget
-but is rendered by the app itself from the 0.5 s stream — drag it anywhere; its position is
-remembered. Full rationale: [ARCHITECTURE.md](ARCHITECTURE.md).
+**Desktop HUD**: right-click the menu-bar icon → *Show Desktop HUD*. It comes in two styles —
+**Full** (default: the entire performance overview — clusters, per-core, GPU, fan, memory,
+battery, network, disk, power rails, top processes) and **Compact** — and is rendered by the
+app itself from the 0.5 s stream. Drag it anywhere; position and style are remembered.
+
+The HUD is **independent of the menu bar**: choose *Hide Menu Bar Icon (HUD keeps running)*
+to run HUD-only. Right-click the HUD itself for its controls (show menu icon, switch style,
+hide, quit) — the app guarantees at least one surface is always visible. Full rationale:
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Architecture
 

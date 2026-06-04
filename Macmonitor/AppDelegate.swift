@@ -19,6 +19,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         setupMenuBar()
+
+        // Standard-setup support: menu-bar icon hidden, HUD as the only surface.
+        if UserDefaults.standard.bool(forKey: "hideMenuBarIcon") {
+            statusItem?.isVisible = false
+            UserDefaults.standard.set(true, forKey: "showDesktopHUD")
+        }
         model.startMonitoring()
 
         // Restore the Desktop HUD if it was visible last session
@@ -104,6 +110,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                 action: #selector(openPopover), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: hudWindow == nil ? "Show Desktop HUD (0.5 s)" : "Hide Desktop HUD",
                                 action: #selector(toggleHUD), keyEquivalent: "h"))
+        let hudStyle = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
+        menu.addItem(NSMenuItem(title: hudStyle == "compact" ? "HUD Style: Compact → switch to Full"
+                                                             : "HUD Style: Full → switch to Compact",
+                                action: #selector(toggleHUDStyle), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Hide Menu Bar Icon (HUD keeps running)",
+                                action: #selector(toggleMenuBarIcon), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings…",
                                 action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
@@ -165,14 +177,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // tick (0.5 s) while looking and behaving like a desktop widget.
 
     @objc func toggleHUD() {
-        if hudWindow != nil { hideHUD() } else { showHUD() }
+        if hudWindow != nil {
+            hideHUD()
+            // Never strand the user with no surface: if the menu-bar icon is
+            // hidden and the HUD goes away, bring the icon back.
+            if UserDefaults.standard.bool(forKey: "hideMenuBarIcon") {
+                UserDefaults.standard.set(false, forKey: "hideMenuBarIcon")
+                statusItem?.isVisible = true
+            }
+        } else {
+            showHUD()
+        }
         UserDefaults.standard.set(hudWindow != nil, forKey: "showDesktopHUD")
+    }
+
+    @objc func toggleMenuBarIcon() {
+        let hide = !(UserDefaults.standard.bool(forKey: "hideMenuBarIcon"))
+        UserDefaults.standard.set(hide, forKey: "hideMenuBarIcon")
+        statusItem?.isVisible = !hide
+        // Hiding the icon with no HUD would strand the user — show the HUD.
+        if hide && hudWindow == nil {
+            showHUD()
+            UserDefaults.standard.set(true, forKey: "showDesktopHUD")
+        }
+    }
+
+    @objc func showMenuBarIcon() {
+        UserDefaults.standard.set(false, forKey: "hideMenuBarIcon")
+        statusItem?.isVisible = true
+    }
+
+    @objc func toggleHUDStyle() {
+        let cur = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
+        UserDefaults.standard.set(cur == "compact" ? "full" : "compact", forKey: "hudStyle")
+        if hudWindow != nil { hideHUD(); showHUD() }   // rebuild with the new style
     }
 
     func showHUD() {
         guard hudWindow == nil else { return }
+        let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
+        let size  = style == "compact" ? NSSize(width: 280, height: 170)
+                                       : NSSize(width: 340, height: 640)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 170),
+            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
             styleMask:   [.borderless, .nonactivatingPanel],
             backing:     .buffered,
             defer:       false
@@ -185,14 +232,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate           = false
         panel.becomesKeyOnlyIfNeeded      = true
-        panel.contentViewController = NSHostingController(
-            rootView: DesktopHUDView(model: model).preferredColorScheme(.dark)
-        )
-        if !panel.setFrameUsingName("MacMonitorHUD"), let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: f.maxX - 300, y: f.maxY - 200))
+        if style == "compact" {
+            panel.contentViewController = NSHostingController(
+                rootView: DesktopHUDView(model: model).preferredColorScheme(.dark)
+                    .contextMenu { HUDMenuItems() }
+            )
+        } else {
+            // Full HUD — the entire performance overview (same view as the
+            // menu-bar popover), pinned to the desktop, streaming at 0.5 s.
+            panel.contentViewController = NSHostingController(
+                rootView: PopoverView(model: model)
+                    .preferredColorScheme(.dark)
+                    .background(Color(red: 0.08, green: 0.08, blue: 0.12).opacity(0.96))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .contextMenu { HUDMenuItems() }
+            )
         }
-        panel.setFrameAutosaveName("MacMonitorHUD")
+        if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: f.maxX - size.width - 20,
+                                         y: f.maxY - size.height - 20))
+        }
+        panel.setFrameAutosaveName("MacMonitorHUD-\(style)")
         panel.orderFrontRegardless()
         hudWindow = panel
     }
@@ -275,6 +336,20 @@ struct DesktopHUDView: View {
             Text("\(pct)%")
                 .font(.system(size: 9, design: .monospaced)).foregroundColor(.white)
                 .frame(width: 30, alignment: .trailing)
+        }
+    }
+}
+
+// MARK: - HUD context menu (escape hatch when the menu-bar icon is hidden)
+
+struct HUDMenuItems: View {
+    var body: some View {
+        Group {
+            Button("Show Menu Bar Icon") { (NSApp.delegate as? AppDelegate)?.showMenuBarIcon() }
+            Button("Switch HUD Style (Full ↔ Compact)") { (NSApp.delegate as? AppDelegate)?.toggleHUDStyle() }
+            Button("Hide Desktop HUD") { (NSApp.delegate as? AppDelegate)?.toggleHUD() }
+            Divider()
+            Button("Quit MacMonitor") { NSApp.terminate(nil) }
         }
     }
 }
