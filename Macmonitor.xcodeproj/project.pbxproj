@@ -7,15 +7,68 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0892060B2FD1D220002B1007 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 089205F22FD1D205002B1007 /* WidgetKit.framework */; };
+		0892060C2FD1D220002B1007 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 089205F42FD1D205002B1007 /* SwiftUI.framework */; };
+		089206172FD1D220002B1007 /* MacMonitorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0892060A2FD1D220002B1007 /* MacMonitorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		606C7E022F77A8C500F11BF3 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 606C7E032F77A8C500F11BF3 /* IOKit.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		089206152FD1D220002B1007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 606C7DEC2F77A8C200F11BF3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 089206092FD1D220002B1007;
+			remoteInfo = MacMonitorWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		089206012FD1D205002B1007 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				089206172FD1D220002B1007 /* MacMonitorWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		089205F22FD1D205002B1007 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		089205F42FD1D205002B1007 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		0892060A2FD1D220002B1007 /* MacMonitorWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MacMonitorWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		606C7DF42F77A8C200F11BF3 /* Macmonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Macmonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		606C7E032F77A8C500F11BF3 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		089206182FD1D220002B1007 /* Exceptions for "MacMonitorWidget" folder in "MacMonitorWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 089206092FD1D220002B1007 /* MacMonitorWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		089205F62FD1D205002B1007 /* MacMonitorWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MacMonitorWidget;
+			sourceTree = "<group>";
+		};
+		0892060D2FD1D220002B1007 /* MacMonitorWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				089206182FD1D220002B1007 /* Exceptions for "MacMonitorWidget" folder in "MacMonitorWidgetExtension" target */,
+			);
+			path = MacMonitorWidget;
+			sourceTree = "<group>";
+		};
 		606C7DF62F77A8C200F11BF3 /* Macmonitor */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Macmonitor;
@@ -24,6 +77,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		089206072FD1D220002B1007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0892060C2FD1D220002B1007 /* SwiftUI.framework in Frameworks */,
+				0892060B2FD1D220002B1007 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		606C7DF12F77A8C200F11BF3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -39,6 +101,8 @@
 			isa = PBXGroup;
 			children = (
 				606C7DF62F77A8C200F11BF3 /* Macmonitor */,
+				089205F62FD1D205002B1007 /* MacMonitorWidget */,
+				0892060D2FD1D220002B1007 /* MacMonitorWidget */,
 				606C7DF52F77A8C200F11BF3 /* Products */,
 				606C7E042F77A8C500F11BF3 /* Frameworks */,
 			);
@@ -48,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				606C7DF42F77A8C200F11BF3 /* Macmonitor.app */,
+				0892060A2FD1D220002B1007 /* MacMonitorWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -56,6 +121,8 @@
 			isa = PBXGroup;
 			children = (
 				606C7E032F77A8C500F11BF3 /* IOKit.framework */,
+				089205F22FD1D205002B1007 /* WidgetKit.framework */,
+				089205F42FD1D205002B1007 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -63,6 +130,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		089206092FD1D220002B1007 /* MacMonitorWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 089206192FD1D220002B1007 /* Build configuration list for PBXNativeTarget "MacMonitorWidgetExtension" */;
+			buildPhases = (
+				089206062FD1D220002B1007 /* Sources */,
+				089206072FD1D220002B1007 /* Frameworks */,
+				089206082FD1D220002B1007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0892060D2FD1D220002B1007 /* MacMonitorWidget */,
+			);
+			name = MacMonitorWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = MacMonitorWidgetExtension;
+			productReference = 0892060A2FD1D220002B1007 /* MacMonitorWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		606C7DF32F77A8C200F11BF3 /* Macmonitor */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 606C7DFF2F77A8C400F11BF3 /* Build configuration list for PBXNativeTarget "Macmonitor" */;
@@ -70,10 +159,12 @@
 				606C7DF02F77A8C200F11BF3 /* Sources */,
 				606C7DF12F77A8C200F11BF3 /* Frameworks */,
 				606C7DF22F77A8C200F11BF3 /* Resources */,
+				089206012FD1D205002B1007 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				089206162FD1D220002B1007 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				606C7DF62F77A8C200F11BF3 /* Macmonitor */,
@@ -92,9 +183,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2640;
+				LastSwiftUpdateCheck = 2650;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					089206092FD1D220002B1007 = {
+						CreatedOnToolsVersion = 26.5;
+					};
 					606C7DF32F77A8C200F11BF3 = {
 						CreatedOnToolsVersion = 26.4;
 					};
@@ -115,11 +209,19 @@
 			projectRoot = "";
 			targets = (
 				606C7DF32F77A8C200F11BF3 /* Macmonitor */,
+				089206092FD1D220002B1007 /* MacMonitorWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		089206082FD1D220002B1007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		606C7DF22F77A8C200F11BF3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -130,6 +232,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		089206062FD1D220002B1007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		606C7DF02F77A8C200F11BF3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -139,7 +248,79 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		089206162FD1D220002B1007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 089206092FD1D220002B1007 /* MacMonitorWidgetExtension */;
+			targetProxy = 089206152FD1D220002B1007 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0892061A2FD1D220002B1007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZG9TS5835W;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MacMonitorWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MacMonitorWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rybo.Macmonitor.MacMonitorWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0892061B2FD1D220002B1007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZG9TS5835W;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MacMonitorWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MacMonitorWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = rybo.Macmonitor.MacMonitorWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		606C7DFD2F77A8C400F11BF3 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -265,13 +446,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 8;
-				DEVELOPMENT_TEAM = C287WU2H3P;
+				DEVELOPMENT_TEAM = ZG9TS5835W;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -287,11 +475,17 @@
 				PRODUCT_BUNDLE_IDENTIFIER = rybo.Macmonitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = Macmonitor/MacMonitor-Bridging-Header.h;
+				SWIFT_OBJC_BRIDGING_HEADER = "Macmonitor/MacMonitor-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -302,13 +496,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 8;
-				DEVELOPMENT_TEAM = C287WU2H3P;
+				DEVELOPMENT_TEAM = ZG9TS5835W;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = YES;
+				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -324,11 +525,17 @@
 				PRODUCT_BUNDLE_IDENTIFIER = rybo.Macmonitor;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
+				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = NO;
+				RUNTIME_EXCEPTION_DEBUGGING_TOOL = NO;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = NO;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = Macmonitor/MacMonitor-Bridging-Header.h;
+				SWIFT_OBJC_BRIDGING_HEADER = "Macmonitor/MacMonitor-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -337,6 +544,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		089206192FD1D220002B1007 /* Build configuration list for PBXNativeTarget "MacMonitorWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0892061A2FD1D220002B1007 /* Debug */,
+				0892061B2FD1D220002B1007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		606C7DEF2F77A8C200F11BF3 /* Build configuration list for PBXProject "Macmonitor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
