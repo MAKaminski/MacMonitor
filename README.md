@@ -49,11 +49,33 @@ brew install --cask macmonitor
 
 Tools: `install_macmonitor` · `macmonitor_status` · `uninstall_macmonitor`. Details in [llms-install.md](llms-install.md).
 
+**Updating:** re-run any install path — it replaces the app in place. No uninstall needed.
+
+## Update frequency
+
+| Surface | Metrics | Cadence |
+|---|---|---|
+| Desktop widget | CPU, memory, network, battery, thermal | ~5 s — WidgetKit best-effort ceiling (macOS may stretch it under load or Low Power Mode) |
+| Menu bar + dashboard | CPU (overall + per-core), memory, swap, network | **0.5 s** — in-process push stream |
+| **Desktop HUD** (right-click menu-bar icon → "Show Desktop HUD") | CPU, memory, network, thermal | **0.5 s** — app-rendered floating panel; the WidgetKit workaround |
+| Dashboard | GPU, temperatures, fan, power rails | 2 s (root helper) |
+| Dashboard | Battery | ~10 s |
+| Dashboard | Disk I/O | 6 s |
+
+Widgets are rendered snapshots — WidgetKit cold-starts the extension per refresh and
+throttles reloads, so ~5 s is the platform ceiling (the app nudges WidgetKit every 5 s to
+keep the widget at that ceiling). For true sub-second numbers on your desktop, use the
+**Desktop HUD**: right-click the menu-bar icon → *Show Desktop HUD*. It looks like a widget
+but is rendered by the app itself from the 0.5 s stream — drag it anywhere; its position is
+remembered. Full rationale: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Architecture
 
 The key design point: **the widget collects its own data.** It samples the Mach kernel
 directly inside the widget process on each timeline refresh (~5 s), so it works even when the
 menu-bar app is closed — and it never needs the root helper or an App Group.
+
+Deep dive — components, sampling cadences, release pipeline: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```mermaid
 flowchart LR

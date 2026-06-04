@@ -1,3 +1,4 @@
+import WidgetKit
 import Foundation
 import AppKit
 import Darwin
@@ -206,6 +207,13 @@ class SystemStatsModel: ObservableObject {
 
             self.tickCount += 1
             if self.tickCount % self.nativeEveryNTicks == 0 { self.fetchNativeMetrics() }
+            // Workaround for WidgetKit's lazy refresh: actively ask it to
+            // reload every 5 s. The system honors app-driven reloads far more
+            // reliably than the widget's own timeline policy; requests faster
+            // than ~5 s are ignored by the OS.
+            if self.tickCount % 10 == 0 {
+                DispatchQueue.main.async { WidgetCenter.shared.reloadAllTimelines() }
+            }
             if shouldFetchBattery { self.fetchBattery() }
         }
     }
