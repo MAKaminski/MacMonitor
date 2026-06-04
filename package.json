@@ -1,0 +1,24 @@
+{
+  "name": "macmonitor-mcp",
+  "version": "2.1.0",
+  "description": "MCP server for the MacMonitor fork — lets AI agents install, check, and remove the MacMonitor menu-bar monitor + desktop widget on Apple Silicon Macs, straight from the GitHub release (no manual DMG handling).",
+  "type": "module",
+  "bin": {
+    "macmonitor-mcp": "mcp/server.js"
+  },
+  "files": [
+    "mcp/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MAKaminski/MacMonitor.git"
+  },
+  "author": "Michael Kaminski",
+  "license": "MIT"
+}

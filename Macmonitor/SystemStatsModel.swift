@@ -114,6 +114,17 @@ class SystemStatsModel: ObservableObject {
     private let helperSudoersPath = "/etc/sudoers.d/macmonitor-helper"
     private var helperBootstrapInFlight = false
 
+    // Two-cadence sampling (issue: refresh rate too slow):
+    //   • Kernel metrics (CPU / MEM / swap / net) are in-process Mach calls —
+    //     cheap enough for 0.5 s, and pushed to the UI via @Published
+    //     (a true stream: subscribers receive updates, no per-tick init cost).
+    //   • Native metrics (GPU / temps / power) spawn the root helper — a
+    //     per-call process launch — so they stay on a 2 s cadence
+    //     (nativeEveryNTicks × fastTickInterval).
+    private let fastTickInterval: TimeInterval = 0.5
+    private let nativeEveryNTicks = 4
+    private var tickCount = 0
+
     // MARK: - Start
 
     func startMonitoring() {
@@ -121,8 +132,8 @@ class SystemStatsModel: ObservableObject {
         _ = sampleCPU()      // fast Mach call — OK on main thread
         prevTickTime = Date()
 
-        // Start main 2-second tick timer immediately — app is responsive at launch.
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Start the fast kernel-metrics timer immediately — app is responsive at launch.
+        timer = Timer.scheduledTimer(withTimeInterval: fastTickInterval, repeats: true) { [weak self] _ in
             self?.tick()
         }
 
@@ -177,7 +188,7 @@ class SystemStatsModel: ObservableObject {
 
             self.batterySampleCountdown -= 1
             let shouldFetchBattery = self.batterySampleCountdown <= 0
-            if shouldFetchBattery { self.batterySampleCountdown = 5 }
+            if shouldFetchBattery { self.batterySampleCountdown = 20 }  // ≈10 s at 0.5 s ticks
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -193,7 +204,8 @@ class SystemStatsModel: ObservableObject {
                 self.thermalState = Self.currentThermalState()
             }
 
-            self.fetchNativeMetrics()
+            self.tickCount += 1
+            if self.tickCount % self.nativeEveryNTicks == 0 { self.fetchNativeMetrics() }
             if shouldFetchBattery { self.fetchBattery() }
         }
     }

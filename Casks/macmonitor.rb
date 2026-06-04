@@ -2,7 +2,7 @@
 # Hosted directly in the MacMonitor repo — no separate tap repo needed.
 #
 # Install:
-#   brew tap ryyansafar/macmonitor https://github.com/ryyansafar/MacMonitor
+#   brew tap MAKaminski/macmonitor https://github.com/MAKaminski/MacMonitor
 #   brew install --cask macmonitor
 #
 # Upgrade (after a new GitHub Release is published):
@@ -12,10 +12,10 @@ cask "macmonitor" do
   version "2.0.2"
   sha256 "10349d5ef6756869c16154dba4d550fe713d4fec95a6f76612eb142e8cee4233"
 
-  url "https://github.com/ryyansafar/MacMonitor/releases/download/v#{version}/MacMonitor-#{version}.dmg"
+  url "https://github.com/MAKaminski/MacMonitor/releases/download/v#{version}/MacMonitor-#{version}.dmg"
   name "MacMonitor"
   desc "Real-time Apple Silicon system monitor — menu bar app and desktop widget"
-  homepage "https://github.com/ryyansafar/MacMonitor"
+  homepage "https://github.com/MAKaminski/MacMonitor"
 
   # Apple Silicon only — M1 through M5+, macOS 13 Ventura and later
   depends_on macos: ">= :ventura"
@@ -45,7 +45,7 @@ cask "macmonitor" do
       brew uninstall mactop
 
     What's new: CPU die hotspot · fan RPM · chip variant (M2 Pro, M2 Max…)
-    Changelog: https://github.com/ryyansafar/MacMonitor/blob/main/CHANGELOG.md
+    Changelog: https://github.com/MAKaminski/MacMonitor/blob/main/CHANGELOG.md
   EOS
 
   # Uninstall: quit app and remove helper

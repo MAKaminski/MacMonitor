@@ -19,8 +19,35 @@ the widget, and cloning + building upstream produces the menu-bar app only.
 | Widget target in `Macmonitor.xcodeproj` | Absent — widget source unbuildable | Wired in as a Widget Extension, embedded in the app |
 | Widget sizes | Small, Medium (source only) | Small, Medium, **Large** |
 | In-widget third-party donation links | Present | Removed |
-| Widget data collection | — | Unchanged from upstream design: self-contained Mach sampling |
-| Menu-bar app | v2.x | Unchanged |
+| Widget data collection | — | Self-contained in-process sampling: per-core CPU, MEM/swap, network, battery, thermal |
+| Dashboard refresh | 2 s tick | 0.5 s kernel-metric stream (`@Published` push); root-helper sensors stay at 2 s |
+| Menu-bar app | v2.x | Otherwise unchanged |
+| Install paths | DMG + brew + script | Same, plus an **MCP server** so AI agents can install it directly |
+
+## Install
+
+**One-liner** (downloads the latest release, installs, clears quarantine, launches — cleans up after itself):
+
+```
+curl -fsSL https://raw.githubusercontent.com/MAKaminski/MacMonitor/main/install.sh | bash
+```
+
+**Homebrew:**
+
+```
+brew tap MAKaminski/macmonitor https://github.com/MAKaminski/MacMonitor
+brew install --cask macmonitor
+```
+
+**Manual:** grab the DMG from [Releases](https://github.com/MAKaminski/MacMonitor/releases), drag to Applications, double-click `Install.command`.
+
+**AI agent / MCP:** this repo is also an MCP server. Point your agent at it and ask it to install:
+
+```json
+{ "mcpServers": { "macmonitor": { "command": "npx", "args": ["-y", "github:MAKaminski/MacMonitor"] } } }
+```
+
+Tools: `install_macmonitor` · `macmonitor_status` · `uninstall_macmonitor`. Details in [llms-install.md](llms-install.md).
 
 ## Architecture
 

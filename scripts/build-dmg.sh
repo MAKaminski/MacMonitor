@@ -110,6 +110,17 @@ chmod +x "$HELPER_OUT"
 [ -x "$HELPER_OUT" ] || fail "Helper compile failed — see clang output above"
 ok "Helper embedded: $(basename "$HELPER_OUT")"
 
+# ── Ad-hoc sign (inside-out: appex, helper, then app) ────────────────────────
+# Apple Silicon requires at least an ad-hoc signature on every binary. The
+# widget extension (.appex) must be signed or WidgetKit refuses to register it
+# on end-user machines.
+step "Ad-hoc signing widget extension + helper + app..."
+find "$APP_PATH/Contents/PlugIns" -name "*.appex" -print0 2>/dev/null | \
+    xargs -0 -I{} codesign --force -s - "{}" 2>/dev/null || true
+codesign --force -s - "$APP_PATH/Contents/MacOS/macmonitor-helper" 2>/dev/null || true
+codesign --force -s - "$APP_PATH" 2>/dev/null || true
+ok "Ad-hoc signed"
+
 # ── Remove quarantine ─────────────────────────────────────────────────────────
 step "Removing quarantine flag..."
 xattr -rd com.apple.quarantine "$APP_PATH" 2>/dev/null || true

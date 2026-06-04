@@ -27,3 +27,4 @@ dist/
 # Instruments
 timeline.xctimeline
 playground.xcplayground
+node_modules/
