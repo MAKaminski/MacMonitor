@@ -11,11 +11,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var hudWindow:  NSPanel?
     let model      = SystemStatsModel()
 
+    // NSApp.delegate is SwiftUI's internal wrapper in the SwiftUI app
+    // lifecycle — casting it to AppDelegate fails. Keep a real reference.
+    static private(set) var shared: AppDelegate?
+
     // Subscribe to model changes so the label updates in sync with each tick,
     // not on a separate independent timer that may fire before data is ready.
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
         NSApp.setActivationPolicy(.accessory)
 
         setupMenuBar()
@@ -345,9 +350,9 @@ struct DesktopHUDView: View {
 struct HUDMenuItems: View {
     var body: some View {
         Group {
-            Button("Show Menu Bar Icon") { (NSApp.delegate as? AppDelegate)?.showMenuBarIcon() }
-            Button("Switch HUD Style (Full ↔ Compact)") { (NSApp.delegate as? AppDelegate)?.toggleHUDStyle() }
-            Button("Hide Desktop HUD") { (NSApp.delegate as? AppDelegate)?.toggleHUD() }
+            Button("Show Menu Bar Icon") { AppDelegate.shared?.showMenuBarIcon() }
+            Button("Switch HUD Style (Full ↔ Compact)") { AppDelegate.shared?.toggleHUDStyle() }
+            Button("Hide Desktop HUD") { AppDelegate.shared?.toggleHUD() }
             Divider()
             Button("Quit MacMonitor") { NSApp.terminate(nil) }
         }
