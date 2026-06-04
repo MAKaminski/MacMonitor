@@ -222,10 +222,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard hudWindow == nil else { return }
         let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
         let size  = style == "compact" ? NSSize(width: 280, height: 170)
-                                       : NSSize(width: 340, height: 640)
+                                       : NSSize(width: 760, height: 240)   // default: horizontal bar
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
-            styleMask:   [.borderless, .nonactivatingPanel],
+            styleMask:   [.borderless, .nonactivatingPanel, .resizable],
             backing:     .buffered,
             defer:       false
         )
@@ -243,16 +243,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     .contextMenu { HUDMenuItems() }
             )
         } else {
-            // Full HUD — the entire performance overview (same view as the
-            // menu-bar popover), pinned to the desktop, streaming at 0.5 s.
-            panel.contentViewController = NSHostingController(
-                rootView: PopoverView(model: model)
+            // Full HUD — adaptive performance overview. Resizable from any
+            // edge; layout re-flows by breakpoint (wide → columns, tall →
+            // stacked). Defaults to a horizontal bar.
+            let hosting = NSHostingController(
+                rootView: AdaptiveHUDView(model: model)
                     .preferredColorScheme(.dark)
-                    .frame(width: 340, height: 640)
-                    .background(Color(red: 0.08, green: 0.08, blue: 0.12).opacity(0.96))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .contextMenu { HUDMenuItems() }
             )
+            hosting.sizingOptions = []   // the window controls size; the view fills it
+            panel.contentViewController = hosting
+            panel.contentMinSize = NSSize(width: 420, height: 160)
         }
         if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -369,5 +371,278 @@ struct HUDMenuItems: View {
             Divider()
             Button("Quit MacMonitor") { NSApp.terminate(nil) }
         }
+    }
+}
+
+// MARK: - Adaptive HUD (resizable; breakpoint-driven responsive layout)
+
+private let hudBG = Color(red: 0.08, green: 0.08, blue: 0.12)
+
+private func hudFmtBytes(_ b: Int64) -> String {
+    let d = Double(b)
+    if d >= 1_073_741_824 { return String(format: "%.1f GB", d / 1_073_741_824) }
+    if d >= 1_048_576     { return String(format: "%.0f MB", d / 1_048_576) }
+    return "\(b) B"
+}
+private func hudFmtRate(_ bps: Int64) -> String {
+    let d = Double(bps)
+    if d >= 1_048_576 { return String(format: "%.1f MB/s", d / 1_048_576) }
+    if d >= 1_024     { return String(format: "%.0f KB/s", d / 1_024) }
+    return String(format: "%.0f B/s", max(d, 0))
+}
+private func hudFmtW(_ w: Double) -> String { String(format: "%.2f W", w) }
+private func hudPctColor(_ v: Int) -> Color { v >= 85 ? .red : v >= 60 ? .yellow : .green }
+private func hudThermColor(_ s: String) -> Color {
+    switch s {
+    case "Normal": return .green
+    case "Fair":   return .yellow
+    default:       return .red
+    }
+}
+
+struct AdaptiveHUDView: View {
+    @ObservedObject var model: SystemStatsModel
+
+    var body: some View {
+        GeometryReader { g in
+            let wide = g.size.width > g.size.height * 1.3
+            let cols = g.size.width >= 980 ? 4 : (g.size.width >= 700 ? 3 : 2)
+            VStack(alignment: .leading, spacing: 8) {
+                HUDHeader(model: model)
+                if wide {
+                    HStack(alignment: .top, spacing: 16) {
+                        HUDCPUSection(model: model)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        if cols == 2 {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HUDMemorySection(model: model)
+                                HUDNetBatterySection(model: model, showProcs: false)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        } else {
+                            HUDMemorySection(model: model)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            HUDNetBatterySection(model: model, showProcs: false)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            if cols >= 4 {
+                                HUDGPUPowerSection(model: model)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                            }
+                        }
+                    }
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HUDCPUSection(model: model)
+                            HUDMemorySection(model: model)
+                            HUDGPUPowerSection(model: model)
+                            HUDNetBatterySection(model: model, showProcs: false)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+            .background(hudBG.opacity(0.96))
+        }
+    }
+}
+
+struct HUDHeader: View {
+    @ObservedObject var model: SystemStatsModel
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(hudThermColor(model.thermalState)).frame(width: 8, height: 8)
+            Text(model.chipName).font(.system(size: 13, weight: .bold)).foregroundColor(.white)
+            Text(model.thermalState).font(.system(size: 10)).foregroundColor(hudThermColor(model.thermalState))
+            if model.fanRPM > 0 {
+                Text("FAN \(model.fanRPM) RPM")
+                    .font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
+            }
+            Spacer()
+            Text(hudFmtW(model.totalPower))
+                .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
+        }
+    }
+}
+
+struct HUDSectionTitle: View {
+    let t: String
+    var body: some View {
+        Text(t).font(.system(size: 8, weight: .semibold)).tracking(1.2).foregroundColor(.gray)
+    }
+}
+
+struct HUDBar: View {
+    let label: String
+    let pct:   Int
+    var color: Color? = nil
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
+                .frame(width: 46, alignment: .leading)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.gray.opacity(0.15))
+                    Capsule().fill(color ?? hudPctColor(pct))
+                        .frame(width: g.size.width * CGFloat(min(max(pct, 0), 100)) / 100)
+                }
+            }
+            .frame(height: 6)
+            Text("\(pct)%").font(.system(size: 9, design: .monospaced)).foregroundColor(.white)
+                .frame(width: 30, alignment: .trailing)
+        }
+    }
+}
+
+struct HUDTiny: View {
+    let label: String
+    let value: String
+    var color: Color = .white
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 8)).foregroundColor(.gray)
+            Text(value).font(.system(size: 10, design: .monospaced)).foregroundColor(color)
+        }
+    }
+}
+
+struct HUDCoreGrid: View {
+    let perCore: [Double]
+    let eCount:  Int
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 3) {
+            ForEach(perCore.indices, id: \.self) { i in
+                let pct = Int(perCore[i].rounded())
+                HStack(spacing: 4) {
+                    Text("C\(i)").font(.system(size: 7, design: .monospaced))
+                        .foregroundColor(i < eCount ? .cyan : .purple)
+                        .frame(width: 20, alignment: .leading)
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.gray.opacity(0.12))
+                            Capsule().fill(i < eCount ? Color.cyan : Color.purple)
+                                .frame(width: g.size.width * CGFloat(min(max(pct, 0), 100)) / 100)
+                        }
+                    }
+                    .frame(height: 4)
+                    Text("\(pct)%").font(.system(size: 7, design: .monospaced)).foregroundColor(.gray)
+                        .frame(width: 24, alignment: .trailing)
+                }
+            }
+        }
+    }
+}
+
+struct HUDCPUSection: View {
+    @ObservedObject var model: SystemStatsModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HUDSectionTitle(t: "CPU")
+            HUDBar(label: "Overall", pct: model.cpuUsage)
+            HUDBar(label: "E \(model.eCoresMHz)MHz", pct: model.eCoresPct, color: .cyan)
+            HUDBar(label: "P \(model.pCoresMHz)MHz", pct: model.pCoresPct, color: .purple)
+            if model.sClusterMHz > 0 {
+                HUDBar(label: "S \(model.sClusterMHz)MHz", pct: model.sClusterPct, color: .orange)
+            }
+            HUDCoreGrid(perCore: model.perCoreCPU, eCount: model.eCoreCount)
+            HStack {
+                HUDTiny(label: "Temp",
+                        value: model.cpuTemp > 0 ? String(format: "%.0f °C", model.cpuTemp) : "—")
+                Spacer()
+                HUDTiny(label: "Hotspot",
+                        value: model.cpuDieHotspot > 0 ? String(format: "%.0f °C", model.cpuDieHotspot) : "—")
+                Spacer()
+                HUDTiny(label: "Power", value: hudFmtW(model.cpuPower), color: .yellow)
+            }
+        }
+    }
+}
+
+struct HUDMemorySection: View {
+    @ObservedObject var model: SystemStatsModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HUDSectionTitle(t: "MEMORY")
+            HUDBar(label: "Used", pct: model.memPct, color: .blue)
+            Text("\(hudFmtBytes(model.memUsed)) / \(hudFmtBytes(model.memTotal))")
+                .font(.system(size: 10, design: .monospaced)).foregroundColor(.white)
+            HStack {
+                HUDTiny(label: "Swap",
+                        value: model.swapUsed > 0 ? hudFmtBytes(model.swapUsed) : "None", color: .gray)
+                Spacer()
+                HUDTiny(label: "DRAM BW",
+                        value: String(format: "%.1f GB/s", model.dramBW), color: .gray)
+            }
+        }
+    }
+}
+
+struct HUDGPUPowerSection: View {
+    @ObservedObject var model: SystemStatsModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HUDSectionTitle(t: model.gpuCoreCount > 0 ? "GPU · \(model.gpuCoreCount) CORES" : "GPU")
+            HUDBar(label: "\(model.gpuMHz) MHz", pct: model.gpuUsage, color: .orange)
+            HStack {
+                HUDTiny(label: "Temp",
+                        value: model.gpuTemp > 0 ? String(format: "%.0f °C", model.gpuTemp) : "—")
+                Spacer()
+                HUDTiny(label: "Power", value: hudFmtW(model.gpuPower), color: .yellow)
+            }
+            HUDSectionTitle(t: "POWER RAILS")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+                HUDTiny(label: "CPU",   value: hudFmtW(model.cpuPower))
+                HUDTiny(label: "GPU",   value: hudFmtW(model.gpuPower))
+                HUDTiny(label: "ANE",   value: hudFmtW(model.anePower))
+                HUDTiny(label: "DRAM",  value: hudFmtW(model.dramPower))
+                HUDTiny(label: "SYS",   value: hudFmtW(model.sysPower))
+                HUDTiny(label: "TOTAL", value: hudFmtW(model.totalPower), color: .yellow)
+            }
+        }
+    }
+}
+
+struct HUDNetBatterySection: View {
+    @ObservedObject var model: SystemStatsModel
+    var showProcs: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HUDSectionTitle(t: "NETWORK")
+            HStack(spacing: 12) {
+                Text("↓ \(hudFmtRate(model.netInBps))")
+                    .font(.system(size: 10, design: .monospaced)).foregroundColor(.green)
+                Text("↑ \(hudFmtRate(model.netOutBps))")
+                    .font(.system(size: 10, design: .monospaced)).foregroundColor(.cyan)
+            }
+            HUDSectionTitle(t: "DISK I/O")
+            HStack(spacing: 12) {
+                Text(String(format: "↓ %.0f KB/s", model.diskReadKBs))
+                    .font(.system(size: 10, design: .monospaced)).foregroundColor(.green)
+                Text(String(format: "↑ %.0f KB/s", model.diskWriteKBs))
+                    .font(.system(size: 10, design: .monospaced)).foregroundColor(.cyan)
+            }
+            HUDSectionTitle(t: "BATTERY")
+            HUDBar(label: batteryLabel, pct: model.batteryPct,
+                   color: model.batteryPct <= 20 ? .red : .green)
+            if showProcs && !model.topProcs.isEmpty {
+                HUDSectionTitle(t: "TOP PROCESSES")
+                ForEach(model.topProcs.prefix(4)) { p in
+                    HStack {
+                        Text(p.name).font(.system(size: 9)).foregroundColor(.white).lineLimit(1)
+                        Spacer()
+                        Text(String(format: "%.1f%%", p.cpu))
+                            .font(.system(size: 9, design: .monospaced)).foregroundColor(.green)
+                    }
+                }
+            }
+        }
+    }
+    private var batteryLabel: String {
+        model.batteryCharging ? "Charging"
+            : model.batteryCharged ? "Charged"
+            : model.batteryOnAC ? "AC"
+            : model.batteryTimeLeft
     }
 }
