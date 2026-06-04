@@ -222,7 +222,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard hudWindow == nil else { return }
         let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
         let size  = style == "compact" ? NSSize(width: 280, height: 170)
-                                       : NSSize(width: 760, height: 240)   // default: horizontal bar
+                                       : NSSize(width: 760, height: 300)   // default: horizontal bar
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
             styleMask:   [.borderless, .nonactivatingPanel, .resizable],
@@ -254,7 +254,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             hosting.sizingOptions = []   // the window controls size; the view fills it
             panel.contentViewController = hosting
-            panel.contentMinSize = NSSize(width: 420, height: 160)
+            panel.contentMinSize = NSSize(width: 420, height: 200)
         }
         if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -281,6 +281,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func hideHUD() {
         hudWindow?.orderOut(nil)
         hudWindow = nil
+    }
+
+    // MARK: - Launcher (Deckboard replacement) actions
+
+    var launcherEditor: NSWindow?
+
+    func adjustVolume(by delta: Int) {
+        let op = delta >= 0 ? "+" : "-"
+        let script = "set volume output volume ((output volume of (get volume settings)) \(op) \(abs(delta)))"
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+    }
+
+    func openLauncherEditor() {
+        if let win = launcherEditor {
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let win = NSWindow(
+            contentRect:  NSRect(x: 0, y: 0, width: 480, height: 340),
+            styleMask:    [.titled, .closable],
+            backing:      .buffered,
+            defer:        false
+        )
+        win.title                 = "HUD Launcher Buttons"
+        win.isReleasedWhenClosed  = false
+        win.contentViewController = NSHostingController(
+            rootView: LauncherEditorView().preferredColorScheme(.dark)
+        )
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        launcherEditor = win
     }
 }
 
@@ -441,6 +474,7 @@ struct AdaptiveHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                HUDLauncherSection()
             }
             .padding(12)
             .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
@@ -644,5 +678,143 @@ struct HUDNetBatterySection: View {
             : model.batteryCharged ? "Charged"
             : model.batteryOnAC ? "AC"
             : model.batteryTimeLeft
+    }
+}
+
+
+// MARK: - Launcher store (persisted to UserDefaults as JSON)
+
+struct LauncherItem: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var url: String
+}
+
+final class LauncherStore: ObservableObject {
+    static let shared = LauncherStore()
+    private static let key = "hudLaunchers"
+
+    @Published var items: [LauncherItem] {
+        didSet { persist() }
+    }
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.key),
+           let saved = try? JSONDecoder().decode([LauncherItem].self, from: data) {
+            items = saved
+        } else {
+            items = [
+                LauncherItem(name: "M1",      url: "https://dashboard.m1.com"),
+                LauncherItem(name: "Monarch", url: "https://app.monarchmoney.com"),
+                LauncherItem(name: "Schwab",  url: "https://client.schwab.com"),
+                LauncherItem(name: "Gmail",   url: "https://mail.google.com"),
+            ]
+        }
+    }
+
+    func add(name: String, url: String) { items.append(LauncherItem(name: name, url: url)) }
+    func remove(_ item: LauncherItem)   { items.removeAll { $0.id == item.id } }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: Self.key)
+        }
+    }
+}
+
+// MARK: - Launcher row in the HUD
+
+struct HUDLauncherSection: View {
+    @ObservedObject var store = LauncherStore.shared
+    private let palette: [Color] = [.green, .blue, .orange, .pink, .teal, .indigo]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HUDSectionTitle(t: "LAUNCHER")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
+                        LauncherButton(label: item.name,
+                                       color: palette[idx % palette.count]) {
+                            if let u = URL(string: item.url) { NSWorkspace.shared.open(u) }
+                        }
+                        .contextMenu {
+                            Button("Remove \(item.name)") { store.remove(item) }
+                        }
+                    }
+                    LauncherButton(label: "Vol −", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.adjustVolume(by: -10)
+                    }
+                    LauncherButton(label: "Vol +", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.adjustVolume(by: 10)
+                    }
+                    LauncherButton(label: "+", color: Color.gray.opacity(0.35)) {
+                        AppDelegate.shared?.openLauncherEditor()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct LauncherButton: View {
+    let label:  String
+    let color:  Color
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.85)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Launcher editor window
+
+struct LauncherEditorView: View {
+    @ObservedObject var store = LauncherStore.shared
+    @State private var name = ""
+    @State private var url  = "https://"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Launcher Buttons")
+                .font(.system(size: 14, weight: .bold))
+            ForEach(store.items) { item in
+                HStack {
+                    Text(item.name)
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 90, alignment: .leading)
+                    Text(item.url)
+                        .font(.system(size: 10)).foregroundColor(.gray).lineLimit(1)
+                    Spacer()
+                    Button("Remove") { store.remove(item) }
+                }
+            }
+            Divider()
+            HStack {
+                TextField("Name", text: $name)
+                    .textFieldStyle(.roundedBorder).frame(width: 110)
+                TextField("https://…", text: $url)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    let trimmed = name.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty, let u = URL(string: url), u.scheme != nil else { return }
+                    store.add(name: trimmed, url: url)
+                    name = ""
+                    url  = "https://"
+                }
+            }
+            Text("Buttons show in the Desktop HUD's LAUNCHER row. Right-click a button in the HUD to remove it.")
+                .font(.system(size: 10)).foregroundColor(.gray)
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(width: 480, height: 320)
     }
 }
