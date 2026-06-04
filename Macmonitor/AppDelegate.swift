@@ -248,6 +248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentViewController = NSHostingController(
                 rootView: PopoverView(model: model)
                     .preferredColorScheme(.dark)
+                    .frame(width: 340, height: 640)
                     .background(Color(red: 0.08, green: 0.08, blue: 0.12).opacity(0.96))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .contextMenu { HUDMenuItems() }
@@ -257,6 +258,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let f = screen.visibleFrame
             panel.setFrameOrigin(NSPoint(x: f.maxX - size.width - 20,
                                          y: f.maxY - size.height - 20))
+        }
+        // Sanity guard: a saved frame can be degenerate (zero height) or
+        // stranded on a display that is no longer attached — reset it.
+        let onAnyScreen = NSScreen.screens.contains { $0.frame.intersects(panel.frame) }
+        if panel.frame.height < 100 || panel.frame.width < 100 || !onAnyScreen {
+            if let screen = NSScreen.main {
+                let f = screen.visibleFrame
+                panel.setFrame(NSRect(x: f.maxX - size.width - 20,
+                                      y: f.maxY - size.height - 20,
+                                      width: size.width, height: size.height),
+                               display: true)
+            }
         }
         panel.setFrameAutosaveName("MacMonitorHUD-\(style)")
         panel.orderFrontRegardless()
