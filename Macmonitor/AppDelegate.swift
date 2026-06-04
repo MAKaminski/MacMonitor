@@ -514,7 +514,7 @@ struct AdaptiveHUDView: View {
                 if wide {
                     HStack(alignment: .bottom, spacing: 16) {
                         HUDLauncherSection()
-                            .frame(width: 300, alignment: .bottomLeading)
+                            .frame(maxWidth: 340, alignment: .bottomLeading)
                         HUDTerminalSection()
                             .frame(maxWidth: .infinity, minHeight: 110)
                     }
@@ -799,8 +799,8 @@ struct HUDLauncherSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HUDSectionTitle(t: "LAUNCHER")
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)],
+                      alignment: .leading, spacing: 6) {
                     ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
                         LauncherButton(label: item.name,
                                        color: palette[idx % palette.count]) {
@@ -819,7 +819,6 @@ struct HUDLauncherSection: View {
                     LauncherButton(label: "+", color: Color.gray.opacity(0.35)) {
                         AppDelegate.shared?.openLauncherEditor()
                     }
-                }
             }
         }
     }
@@ -834,8 +833,9 @@ struct LauncherButton: View {
             Text(label)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.white)
-                .padding(.horizontal, 10)
+                .lineLimit(1)
                 .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
                 .background(RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.85)))
         }
         .buttonStyle(.plain)
