@@ -62,20 +62,32 @@ final class MessagesStore: ObservableObject {
         guard let c = selected else { return }
         let esc = text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let script = "tell application \"Messages\" to send \"\(esc)\" to chat id \"\(c.guid)\""
-        // Background-agent apps (.accessory) can't surface the Automation consent
-        // prompt; briefly become a regular foreground app so it can appear.
-        let prevPolicy = NSApp.activationPolicy()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        var err: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&err)
-        NSApp.setActivationPolicy(prevPolicy)
-        if let err = err {
-            let brief = (err["NSAppleScriptErrorBriefMessage"] as? String) ?? "send failed"
-            self.error = "Send failed: \(brief). Grant Automation → Messages in System Settings → Privacy & Security → Automation."
-        } else {
-            self.error = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.refresh() }
+        // Send via a child `osascript` process. In-app NSAppleScript from a
+        // background agent gets its Automation prompt suppressed and silently
+        // denied; routing through osascript makes macOS surface the
+        // "MacMonitor wants to control Messages" consent prompt reliably.
+        DispatchQueue.global().async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            proc.arguments = ["-e", script]
+            let errPipe = Pipe()
+            proc.standardError = errPipe
+            do { try proc.run() } catch {
+                DispatchQueue.main.async { self.error = "Couldn't launch osascript: \(error.localizedDescription)" }
+                return
+            }
+            proc.waitUntilExit()
+            let errStr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let ok = proc.terminationStatus == 0
+            DispatchQueue.main.async {
+                if ok {
+                    self.error = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.refresh() }
+                } else {
+                    self.error = "Send failed: \(errStr). If prompted, allow Automation → Messages."
+                }
+            }
         }
     }
 

@@ -869,11 +869,18 @@ struct HUDNetBatterySection: View {
 
 // MARK: - Launcher store (persisted to UserDefaults as JSON)
 
+struct LauncherAccount: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var url: String
+    var badge: String? = nil
+}
 struct LauncherItem: Identifiable, Codable, Equatable {
     var id = UUID()
     var name: String
     var url: String
     var badge: String? = nil   // poll kind: "gmail", "outlook", "financial", …
+    var accounts: [LauncherAccount]? = nil   // if set, clicking opens an account modal
 }
 
 final class LauncherStore: ObservableObject {
@@ -920,7 +927,8 @@ struct HUDLauncherSection: View {
                     ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
                         LauncherButton(label: item.name,
                                        color: palette[idx % palette.count],
-                                       badge: badges.count(for: item.badge)) {
+                                       badge: badges.total(for: item),
+                                       accounts: item.accounts ?? []) {
                             if let u = URL(string: item.url) { NSWorkspace.shared.open(u) }
                         }
                         .contextMenu {
@@ -996,9 +1004,11 @@ struct LauncherButton: View {
     let label:  String
     let color:  Color
     var badge:  Int? = nil
+    var accounts: [LauncherAccount] = []
     let action: () -> Void
+    @State private var showAccounts = false
     var body: some View {
-        Button(action: action) {
+        Button(action: { if accounts.isEmpty { action() } else { showAccounts = true } }) {
             Text(label)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.white)
@@ -1017,6 +1027,40 @@ struct LauncherButton: View {
                 }
         }
         .buttonStyle(.plain)
+        .popover(isPresented: $showAccounts, arrowEdge: .bottom) {
+            AccountPopover(title: label, accounts: accounts)
+        }
+    }
+}
+
+struct AccountPopover: View {
+    let title: String
+    let accounts: [LauncherAccount]
+    @ObservedObject var badges = BadgeStore.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
+            ForEach(accounts) { acc in
+                Button {
+                    if let u = URL(string: acc.url) { NSWorkspace.shared.open(u) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if let n = badges.count(for: acc.badge) {
+                            Text("\(n)").font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.red).clipShape(Capsule())
+                        } else {
+                            Circle().fill(Color.gray.opacity(0.4)).frame(width: 7, height: 7)
+                        }
+                        Text(acc.name).font(.system(size: 12))
+                        Spacer(minLength: 16)
+                        Image(systemName: "arrow.up.forward.app").font(.system(size: 10)).foregroundColor(.secondary)
+                    }
+                    .frame(minWidth: 190).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(12)
     }
 }
 
@@ -1314,5 +1358,12 @@ final class BadgeStore: ObservableObject {
     func count(for kind: String?) -> Int? {
         guard let k = kind, let n = counts[k], n > 0 else { return nil }
         return n
+    }
+    func total(for item: LauncherItem) -> Int? {
+        if let accts = item.accounts, !accts.isEmpty {
+            let sum = accts.compactMap { count(for: $0.badge) }.reduce(0, +)
+            return sum > 0 ? sum : nil
+        }
+        return count(for: item.badge)
     }
 }
