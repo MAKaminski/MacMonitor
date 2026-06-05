@@ -337,11 +337,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Media transport via the active player (Spotify, then Music). `cmd` is an
     /// AppleScript verb: "playpause", "next track", or "previous track".
     func mediaControl(_ cmd: String) {
-        // Only act if a known player is already running, so an idle press never
-        // launches Apple Music. Media keys then route to the running player.
         let players: Set<String> = ["com.spotify.client", "com.apple.Music"]
-        guard NSWorkspace.shared.runningApplications.contains(where: { players.contains($0.bundleIdentifier ?? "") }) else { return }
-        // Universal media keys: NX_KEYTYPE_PLAY=16, NEXT=17, PREVIOUS=18.
+        let running = NSWorkspace.shared.runningApplications.contains { players.contains($0.bundleIdentifier ?? "") }
+        if running {
+            sendMediaKey(cmd)                       // control the running player
+        } else if cmd == "playpause" {
+            // Nothing playing: launch Spotify (never Apple Music), then play.
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") {
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.sendMediaKey("playpause") }
+                }
+            }
+        }
+        // next/prev with nothing running: ignore
+    }
+    private func sendMediaKey(_ cmd: String) {
         let key = cmd == "next track" ? 17 : (cmd == "previous track" ? 18 : 16)
         func post(_ down: Bool) {
             let flags = NSEvent.ModifierFlags(rawValue: UInt(down ? 0xA00 : 0xB00))
