@@ -2,84 +2,91 @@
 """
 MacMonitor Monarch poller — hourly LaunchAgent, confined to MacMonitor.
 
-Writes ~/.config/macmonitor/monarch.json (last 6 months: income/expense,
-assets/liabilities, net worth) for the MONARCH tab. Auth comes from
-~/.config/macmonitor/monarch_token (a Monarch GraphQL token — grab it from
-an app.monarchmoney.com session: localStorage persist:root → user.token).
-Exits silently until that token exists.
+Auth: rides the Chrome cookie session for app.monarch.com (browser_cookie3
+decrypts Chrome's cookie store via Keychain; the session refreshes itself
+whenever Michael uses Monarch in Chrome — no password, no token file).
+Writes ~/.config/macmonitor/monarch.json for the MNRCH tab:
+  { updated, months[], income[], expense[], assets[], liabilities[], netWorth[] }
 """
-import json, os, sys, datetime, urllib.request
+import datetime
+import json
+import os
+import sys
 
-TOK_PATH = os.path.expanduser("~/.config/macmonitor/monarch_token")
-OUT_PATH = os.path.expanduser("~/.config/macmonitor/monarch.json")
-if not os.path.exists(TOK_PATH):
-    sys.exit(0)
-TOKEN = open(TOK_PATH).read().strip()
+import browser_cookie3
+import requests
 
-def gql(operation, query, variables=None):
-    req = urllib.request.Request(
-        "https://api.monarchmoney.com/graphql",
-        data=json.dumps({"operationName": operation, "query": query,
-                         "variables": variables or {}}).encode(),
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Token {TOKEN}",
-                 "Client-Platform": "web",
-                 "User-Agent": "macmonitor-monarch-poller"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        out = json.loads(r.read().decode())
-    if out.get("errors"):
-        raise RuntimeError(out["errors"][0].get("message", "graphql error"))
-    return out["data"]
-
-today = datetime.date.today()
-start = (today.replace(day=1) - datetime.timedelta(days=160)).replace(day=1)  # ~6 months back
-months, income, expense, assets, liab, net = [], [], [], [], [], []
+OUT = os.path.expanduser("~/.config/macmonitor/monarch.json")
+API = "https://api.monarch.com/graphql"
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 try:
-    # Cashflow by month (sumIncome / sumExpense aggregates)
-    cf = gql("Web_GetCashFlowPage", """
-      query Web_GetCashFlowPage($filters: TransactionFilterInput) {
-        byMonth: aggregates(filters: $filters, groupBy: ["month"]) {
-          groupBy { month __typename }
-          summary { sumIncome sumExpense __typename }
-          __typename
-        }
-      }""", {"filters": {"search": "", "categories": [], "accounts": [], "tags": [],
-                          "startDate": start.isoformat(), "endDate": today.isoformat()}})
-    rows = sorted(cf["byMonth"], key=lambda r: r["groupBy"]["month"])[-6:]
-    for r in rows:
-        m = r["groupBy"]["month"]                      # "2026-01-01"
-        months.append(datetime.date.fromisoformat(m).strftime("%b"))
-        income.append(round(float(r["summary"]["sumIncome"]), 2))
-        expense.append(round(abs(float(r["summary"]["sumExpense"])), 2))
+    jar = browser_cookie3.chrome(domain_name="monarch.com")
+except Exception as e:                                     # noqa: BLE001
+    sys.stderr.write(f"monarch poller: cookie read failed: {e}\n"); sys.exit(1)
 
-    # Net worth + assets/liabilities from monthly account-type snapshots
-    sn = gql("Common_GetSnapshotsByAccountType", """
-      query Common_GetSnapshotsByAccountType($startDate: Date!, $timeframe: Timeframe!) {
-        snapshotsByAccountType(startDate: $startDate, timeframe: $timeframe) {
-          accountType month balance __typename
-        }
-        accountTypes { name group __typename }
-      }""", {"startDate": start.isoformat(), "timeframe": "month"})
-    groups = {t["name"]: t["group"] for t in sn.get("accountTypes", [])}
-    bym = {}
-    for row in sn["snapshotsByAccountType"]:
-        m = row["month"][:7]
-        g = groups.get(row["accountType"], "asset")
-        bym.setdefault(m, {"asset": 0.0, "liability": 0.0})
-        bym[m][g if g in ("asset", "liability") else "asset"] += float(row["balance"])
-    keys = sorted(bym)[-6:]
-    assets = [round(bym[k]["asset"], 2) for k in keys]
-    liab = [round(abs(bym[k]["liability"]), 2) for k in keys]
-    net = [round(a - l, 2) for a, l in zip(assets, liab)]
-    if not months:                                     # cashflow failed but snapshots worked
-        months = [datetime.date.fromisoformat(k + "-01").strftime("%b") for k in keys]
-except Exception as e:
-    sys.stderr.write(f"monarch poller: {e}\n")
+csrf = next((c.value for c in jar if c.name == "csrftoken"), None)
+if not csrf:
+    sys.stderr.write("monarch poller: no csrftoken — log into app.monarch.com in Chrome\n")
     sys.exit(1)
 
-json.dump({"updated": datetime.datetime.now().timestamp(), "months": months,
+s = requests.Session()
+s.cookies = jar
+HDRS = {"Content-Type": "application/json", "X-CSRFToken": csrf,
+        "Origin": "https://app.monarch.com", "Referer": "https://app.monarch.com/",
+        "User-Agent": UA}
+
+
+def gql(query, variables=None):
+    r = s.post(API, json={"query": query, "variables": variables or {}},
+               headers=HDRS, timeout=30)
+    out = r.json()
+    if r.status_code != 200 or out.get("errors"):
+        raise RuntimeError(f"HTTP {r.status_code}: {str(out)[:160]}")
+    return out["data"]
+
+
+today = datetime.date.today()
+start = (today.replace(day=1) - datetime.timedelta(days=152)).replace(day=1)   # 6 calendar months
+
+# 1) Cashflow by month
+cf = gql("""query($filters: TransactionFilterInput) {
+  aggregates(filters:$filters, groupBy:["month"]) {
+    groupBy { month } summary { sumIncome sumExpense } } }""",
+         {"filters": {"startDate": start.isoformat(), "endDate": today.isoformat()}})
+rows = sorted(cf["aggregates"], key=lambda r: r["groupBy"]["month"])[-6:]
+months = [datetime.date.fromisoformat(r["groupBy"]["month"]).strftime("%b %y") for r in rows]
+income = [round(float(r["summary"]["sumIncome"] or 0), 2) for r in rows]
+expense = [round(abs(float(r["summary"]["sumExpense"] or 0)), 2) for r in rows]
+
+# 2) Assets / liabilities / net worth from monthly account-type snapshots
+sn = gql("""query($startDate: Date!, $timeframe: Timeframe!) {
+  snapshotsByAccountType(startDate:$startDate, timeframe:$timeframe) {
+    accountType month balance }
+  accountTypes { name group } }""",
+         {"startDate": start.isoformat(), "timeframe": "month"})
+group = {t["name"]: t["group"] for t in sn.get("accountTypes", [])}
+bym = {}
+for row in sn["snapshotsByAccountType"]:
+    m = row["month"][:7]
+    g = group.get(row["accountType"], "asset")
+    bym.setdefault(m, {"asset": 0.0, "liability": 0.0})
+    bym[m]["liability" if g == "liability" else "asset"] += float(row["balance"] or 0)
+mkeys = [datetime.date(int(m[:4]), int(m[5:7]), 1) for m in sorted(bym)]
+mkeys = [k for k in mkeys if k >= start][-6:]
+assets = [round(bym[k.strftime("%Y-%m")]["asset"], 2) for k in mkeys]
+liab = [round(abs(bym[k.strftime("%Y-%m")]["liability"]), 2) for k in mkeys]
+net = [round(a - l, 2) for a, l in zip(assets, liab)]
+if not months:
+    months = [k.strftime("%b %y") for k in mkeys]
+
+payload = {"updated": datetime.datetime.now().timestamp(), "months": months,
            "income": income, "expense": expense,
-           "assets": assets, "liabilities": liab, "netWorth": net},
-          open(OUT_PATH, "w"), indent=1)
+           "assets": assets, "liabilities": liab, "netWorth": net}
+tmp = OUT + ".tmp"
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+with open(tmp, "w") as f:
+    json.dump(payload, f, indent=1)
+os.replace(tmp, OUT)
 print("monarch.json written:", months)
