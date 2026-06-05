@@ -1,0 +1,117 @@
+# MacMonitor 2.3.2
+
+## [2.3.2] — 2026-06-05
+
+### Added
+
+- **Position carries across HUD sizes.** Small and large HUD now share a single
+  top-left anchor: convert large → small and the small HUD appears exactly
+  where the large one sat; move the small HUD and convert back, and the large
+  HUD comes up at the moved position (shrink-to-fit from 2.3.1 handles any
+  overflow). Implementation: shared `hudAnchorTopLeft` (`NSStringFromPoint`)
+  written on drag-end, on `toggleHUDStyle()`, and after final placement in
+  `showHUD()`; per-style frames keep their **size**, the anchor sets
+  **position** (`AppDelegate.swift`).
+
+### Fixed
+
+- **Autosave no longer clobbers corrections.** `setFrameAutosaveName` implicitly
+  re-applies the saved frame when attached; attached at the END of `showHUD()` it
+  could override the shared anchor and the 2.3.1 off-screen shrink-to-fit pass on
+  relaunch. It now attaches FIRST, so every correction runs after it.
+
+## [2.3.1] — 2026-06-05
+
+### Fixed
+
+- **Off-screen recovery.** If the HUD was dragged so any part of it sat off its
+  monitor, quitting and relaunching now restores it **fully on-screen**: the
+  window is clamped against the display it actually occupies (chosen by
+  max-overlap, not `NSScreen.main`, which can be a different monitor in
+  multi-display setups), and if the window is larger than that display it
+  **shrinks itself** until every edge fits within the monitor's visible bounds.
+  Implementation: fit-to-screen pass at the end of `showHUD()`
+  (`AppDelegate.swift`) — shrink `width/height` to `visibleFrame − 16`
+  (floors: 320×160), then pull `minX/maxX/minY/maxY` inside with an 8 pt margin.
+
+## [2.3.0] — 2026-06-05
+
+### The "Control Center" Release
+
+Six HUD tabs, real iMessage send, contact-name resolution, a per-account Gmail
+modal, self-contained mail polling, persisted window position, and liquid-fill
+UI throughout. Everything below is new since 2.1.3.
+
+### Added — user-facing
+
+- **iMessage (iMSG) tab now sends.** Hitting Send actually delivers (the
+  Automation consent prompt finally surfaces). Opening a conversation jumps
+  straight to the newest message, and a **red unread badge** rides the iMSG tab.
+- **Contact names.** The iMSG tab resolves phone numbers and emails to your
+  Contacts names instead of showing raw `+1…` handles.
+- **Per-account launcher modal.** Clicking a launcher button with linked
+  accounts (e.g. Gmail) opens a modal listing each account with **its own red
+  flag**; the button shows the **sum**, so the cumulative count is traceable.
+- **HUD remembers where you put it** — exact position *and* monitor — and
+  restores there after an update or reinstall.
+- **Liquid animated fills** on every bar and slider; a **battery-shaped volume
+  slider** replaces the old Vol−/Vol+ buttons.
+
+### Changed
+
+- **Gmail badge now reflects Inbox-unread** (matches the number Gmail shows),
+  not all-mail-including-archived. Fixed a case that showed `12`/`99+` when the
+  real inbox-unread was `2`.
+- **iMSG unread badge counts only the last 30 days** of incoming unread — the
+  Mac's Messages DB hoards hundreds of ancient `is_read=0` rows that would
+  otherwise read `99+`.
+- **Badge polling is fully self-contained.** Removed the external Claude
+  scheduled task; a bundled LaunchAgent (`de.modularequity.macmonitor.mailpoller`)
+  now polls IMAP every 5 minutes.
+
+### Fixed
+
+- Header drag was sticky / jumped — now tracks the cursor 1:1 via absolute
+  screen coordinates.
+- HUD defaulted to locked with no visible unlock; now defaults unlocked with a
+  lock/unlock switch in the header.
+
+### Developer notes — where things live
+
+**`MessagesTab.swift`**
+- `MessagesStore.send(_:)` routes the AppleScript through a child
+  `/usr/bin/osascript` `Process` so an agent (LSUIElement) app can surface the
+  "control Messages" Automation prompt.
+- `ContactsResolver` (CNContactStore) builds `phone[last10]→name` and
+  `email→name` maps. It flips `NSApp.setActivationPolicy(.regular)` +
+  `activate` for the **first** Contacts TCC prompt (agent apps can't prompt
+  otherwise), then reverts to `.accessory` in the completion handler.
+- `queryUnread(_:)` → `SELECT COUNT(*) … is_from_me=0 AND is_read=0 AND
+  (date/1000000000 + 978307200) > strftime('%s','now','-30 days')`
+  (Apple-epoch nanosecond conversion) → `@Published unreadCount`.
+- `queryConversations(_:)` now selects `display_name` and `chat_identifier`
+  separately and resolves the name in Swift via `ContactsResolver`.
+
+**`AppDelegate.swift`**
+- `showHUD()` restores `hudFrameSaved-<style>` (`NSStringFromRect`) **before**
+  AppKit autosave / device defaults; the header drag `.onEnded` writes the
+  frame to UserDefaults, so position survives reinstalls.
+- `LauncherAccount` model + `AccountPopover` view; `BadgeStore.total(for:)`
+  sums per-account badges; `HUDTabButton` gained a red `badge` overlay wired to
+  `MessagesStore.unreadCount`.
+
+**Build / packaging**
+- New `INFOPLIST_KEY_NSContactsUsageDescription` (both build configs).
+- `mail-poller.py` (stdlib `imaplib`, `INBOX` `UNSEEN`) + `install_mail_poller.sh`
+  installs the LaunchAgent and a `~/.config/macmonitor/mail.json` template.
+
+### Data structures (reference)
+
+| Thing | Shape / location |
+|---|---|
+| Launcher config | `LauncherItem { name, url, badge?, accounts:[LauncherAccount{ name, url, badge? }] }` → UserDefaults `rybo.Macmonitor → hudLaunchers` (JSON) |
+| Badge counts | `~/.config/macmonitor/badges/<kind>.count` (plain integer) |
+| Mail poller config | `~/.config/macmonitor/mail.json` → `{ accounts:[{ badge, host, email, app_password, mailbox, query }] }` |
+| HUD position | UserDefaults `hudFrameSaved-full` / `hudFrameSaved-compact` (`NSStringFromRect`) |
+| Messages source | `~/Library/Messages/chat.db` → `chat`, `message`, `chat_message_join` |
+

@@ -7,6 +7,26 @@ Dates: ISO 8601 (YYYY-MM-DD)
 
 ---
 
+## [2.3.2] — 2026-06-05
+
+### Added
+
+- **Position carries across HUD sizes.** Small and large HUD now share a single
+  top-left anchor: convert large → small and the small HUD appears exactly
+  where the large one sat; move the small HUD and convert back, and the large
+  HUD comes up at the moved position (shrink-to-fit from 2.3.1 handles any
+  overflow). Implementation: shared `hudAnchorTopLeft` (`NSStringFromPoint`)
+  written on drag-end, on `toggleHUDStyle()`, and after final placement in
+  `showHUD()`; per-style frames keep their **size**, the anchor sets
+  **position** (`AppDelegate.swift`).
+
+### Fixed
+
+- **Autosave no longer clobbers corrections.** `setFrameAutosaveName` implicitly
+  re-applies the saved frame when attached; attached at the END of `showHUD()` it
+  could override the shared anchor and the 2.3.1 off-screen shrink-to-fit pass on
+  relaunch. It now attaches FIRST, so every correction runs after it.
+
 ## [2.3.1] — 2026-06-05
 
 ### Fixed

@@ -218,6 +218,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleHUDStyle() {
         let cur = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
         UserDefaults.standard.set(cur == "compact" ? "full" : "compact", forKey: "hudStyle")
+        // Carry the position across the size switch: both sizes share one
+        // top-left anchor, so the other size appears where this one sits.
+        if let w = hudWindow {
+            UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: w.frame.minX, y: w.frame.maxY)),
+                                      forKey: "hudAnchorTopLeft")
+        }
         if hudWindow != nil { hideHUD(); showHUD() }   // rebuild with the new style
     }
 
@@ -261,6 +267,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentViewController = hosting
             panel.contentMinSize = NSSize(width: 420, height: 200)
         }
+        // Attach the autosave name FIRST: attaching implicitly re-applies the
+        // saved frame, so doing it last would clobber the anchor, sanity and
+        // fit-to-screen corrections below. Attached here, it restores early and
+        // every later pass can correct it.
+        panel.setFrameAutosaveName("MacMonitorHUD-\(style)")
         var restoredSaved = false
         if let sv = UserDefaults.standard.string(forKey: "hudFrameSaved-\(style)") {
             let r = NSRectFromString(sv)
@@ -278,6 +289,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let h = min(max(f.height * 0.42, 320), f.height - 32)
                 panel.setFrame(NSRect(x: f.maxX - w - 16, y: f.minY + 16,
                                       width: w, height: h), display: true)
+            }
+        }
+        // Shared anchor: both HUD sizes pin their TOP-LEFT to the same point,
+        // so moving the small HUD moves where the large one appears (and vice
+        // versa). Per-style frames keep their SIZE; the anchor sets position.
+        if let a = UserDefaults.standard.string(forKey: "hudAnchorTopLeft") {
+            let pt = NSPointFromString(a)
+            if pt.x != 0 || pt.y != 0 {
+                var fr = panel.frame
+                fr.origin = NSPoint(x: pt.x, y: pt.y - fr.height)
+                panel.setFrame(fr, display: true)
             }
         }
         // Sanity guard: a saved frame can be degenerate (zero height) or
@@ -313,7 +335,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if fr.maxY > vf.maxY { fr.origin.y = vf.maxY - fr.height - 8 }
             panel.setFrame(fr, display: true)
         }
-        panel.setFrameAutosaveName("MacMonitorHUD-\(style)")
+        UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: panel.frame.minX, y: panel.frame.maxY)),
+                                  forKey: "hudAnchorTopLeft")
         panel.orderFrontRegardless()
         hudWindow = panel
     }
@@ -688,6 +711,8 @@ struct HUDHeader: View {
                     if let win = NSApp.windows.first(where: { $0 is HUDPanel }) {
                         let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
                         UserDefaults.standard.set(NSStringFromRect(win.frame), forKey: "hudFrameSaved-\(style)")
+                        UserDefaults.standard.set(NSStringFromPoint(NSPoint(x: win.frame.minX, y: win.frame.maxY)),
+                                                  forKey: "hudAnchorTopLeft")
                     }
                 }
         )
