@@ -26,6 +26,8 @@ final class MessagesStore: ObservableObject {
     @Published var selected: IMConversation?
     @Published var error: String?
     @Published var unreadCount: Int = 0      // incoming unread, drives the iMSG tab badge
+    @Published var crafting = false          // Craft Auto Response in flight
+    @Published var suggestion: String?       // Claude's drafted reply (never auto-sent)
 
     private let dbPath = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db")
     private var timer: Timer?
@@ -94,6 +96,56 @@ final class MessagesStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// "Craft Auto Response" — sends the recent thread to Claude and fills the
+    /// draft field with a suggested reply. NEVER sends; the user reviews first.
+    /// Key: ~/.config/macmonitor/anthropic_key
+    func craftReply() {
+        guard let c = selected, !crafting else { return }
+        let keyPath = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".config/macmonitor/anthropic_key")
+        guard let key = (try? String(contentsOfFile: keyPath, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
+            error = "Craft: paste an Anthropic API key into ~/.config/macmonitor/anthropic_key"
+            return
+        }
+        crafting = true
+        let convo = messages.suffix(12)
+            .map { ($0.fromMe ? "Michael" : c.name) + ": " + $0.text }
+            .joined(separator: "\n")
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        let body: [String: Any] = [
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 300,
+            "system": "You draft iMessage replies for Michael. Match his texting voice: concise, warm, casual. Return ONLY the reply text — no quotes, no preamble, no sign-off.",
+            "messages": [["role": "user",
+                          "content": "Conversation with \(c.name):\n\(convo)\n\nDraft Michael's next reply."]],
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            DispatchQueue.main.async {
+                self.crafting = false
+                guard err == nil, let data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self.error = "Craft failed: \(err?.localizedDescription ?? "no response")"
+                    return
+                }
+                if let text = ((obj["content"] as? [[String: Any]])?.first?["text"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                    self.suggestion = text
+                    self.error = nil
+                } else if let e = (obj["error"] as? [String: Any])?["message"] as? String {
+                    self.error = "Craft: \(e)"
+                } else {
+                    self.error = "Craft: empty response"
+                }
+            }
+        }.resume()
     }
 
     // MARK: - SQLite (nonisolated; runs off-main)
@@ -328,8 +380,25 @@ struct MessagesTabView: View {
                 HStack(spacing: 8) {
                     TextField("iMessage", text: $draft, onCommit: sendDraft)
                         .textFieldStyle(.roundedBorder)
+                    Button {
+                        store.craftReply()
+                    } label: {
+                        if store.crafting {
+                            ProgressView().controlSize(.small).frame(width: 126)
+                        } else {
+                            Text("Craft Auto Response").font(.system(size: 11, weight: .semibold))
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 0.80, green: 0.47, blue: 0.36))   // Claude burnt orange (#CC785C)
+                    .disabled(store.crafting)
+                    .help("Claude drafts a reply into the field — nothing is sent until you hit Send")
                     Button("Send", action: sendDraft).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
-                }.padding(8).background(Color(white: 0.10))
+                }
+                .padding(8).background(Color(white: 0.10))
+                .onChange(of: store.suggestion) { s in
+                    if let s { draft = s; store.suggestion = nil }   // fill, never send
+                }
             } else {
                 Text("Select a conversation").foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

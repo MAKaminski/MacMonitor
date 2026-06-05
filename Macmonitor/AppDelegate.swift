@@ -612,6 +612,9 @@ struct AdaptiveHUDView: View {
                 } else if tab == "monarch" {
                     MonarchTabView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "whatnot" {
+                    WhatnotTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                 if !dashCollapsed {
                 if wide {
@@ -704,6 +707,7 @@ struct HUDHeader: View {
             HUDTabButton(label: "FIN",   id: "finance", tab: $tab)
             HUDTabButton(label: "CHARTS", id: "charts", tab: $tab)
             HUDTabButton(label: "MNRCH", id: "monarch", tab: $tab)
+            HUDTabButton(label: "WTNT", id: "whatnot", tab: $tab)
             HUDTabButton(label: "OURA", id: "oura", tab: $tab)
             HUDTabButton(label: "iMSG", id: "messenger", tab: $tab, badge: imsg.unreadCount)
             Text(hudFmtW(model.totalPower))
