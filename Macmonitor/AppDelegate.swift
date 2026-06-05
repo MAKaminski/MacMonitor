@@ -616,6 +616,7 @@ struct HUDHeader: View {
     @ObservedObject var model: SystemStatsModel
     @Binding var tab: String
     @AppStorage("dashCollapsed") private var dashCollapsed = false
+    @AppStorage("hudLocked") private var hudLocked = false
     @State private var dragOffset: CGSize? = nil
     var body: some View {
         HStack(spacing: 8) {
@@ -625,6 +626,14 @@ struct HUDHeader: View {
             if model.fanRPM > 0 {
                 Text("FAN \(model.fanRPM) RPM")
                     .font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
+            }
+            HStack(spacing: 3) {
+                Image(systemName: hudLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 10)).foregroundColor(hudLocked ? .orange : .green)
+                Toggle("", isOn: Binding(get: { hudLocked },
+                                         set: { _ in AppDelegate.shared?.toggleHUDLock() }))
+                    .toggleStyle(.switch).labelsHidden().controlSize(.mini)
+                    .help(hudLocked ? "Locked — flip to unlock & move/resize" : "Unlocked — flip to lock")
             }
             if tab == "dash" {
                 Button { dashCollapsed.toggle() } label: {
