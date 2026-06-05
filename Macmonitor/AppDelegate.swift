@@ -704,8 +704,8 @@ struct HUDBar: View {
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.gray.opacity(0.15))
-                    Capsule().fill(color ?? hudPctColor(pct))
-                        .frame(width: g.size.width * CGFloat(min(max(pct, 0), 100)) / 100)
+                    LiquidFill(level: Double(min(max(pct, 0), 100)) / 100, color: color ?? hudPctColor(pct))
+                        .clipShape(Capsule())
                 }
             }
             .frame(height: 6)

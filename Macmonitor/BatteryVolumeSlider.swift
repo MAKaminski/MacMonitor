@@ -19,9 +19,8 @@ struct BatteryVolumeSlider: View {
             HStack(spacing: 3) {
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.08))
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(fillColor)
-                        .frame(width: max(4, bodyW * CGFloat(vol / 100)))
+                    LiquidFill(level: vol / 100, color: fillColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
                     Text("\(Int(vol.rounded()))")
                         .font(.system(size: 10, weight: .bold).monospacedDigit())
                         .foregroundColor(.white)
