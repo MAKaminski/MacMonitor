@@ -1,6 +1,6 @@
-# MacMonitor 2.2.0
+# MacMonitor 2.3.0
 
-## [2.2.0] — 2026-06-05
+## [2.3.0] — 2026-06-05
 
 ### The "Control Center" Release
 

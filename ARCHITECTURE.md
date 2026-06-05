@@ -145,7 +145,7 @@ flowchart LR
 
 ---
 
-## HUD tabs & data sources (2.2.0)
+## HUD tabs & data sources (2.3.0)
 
 The adaptive HUD (`AdaptiveHUDView` in `AppDelegate.swift`) hosts six tabs, each
 backed by its own store:
