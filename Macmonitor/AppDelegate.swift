@@ -31,6 +31,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: "showDesktopHUD")
         }
         model.startMonitoring()
+        MetricHistory.shared.start(model: model)
+        OuraStore.shared.refresh()
+        BadgeStore.shared.start()
 
         // Restore the Desktop HUD if it was visible last session
         if UserDefaults.standard.bool(forKey: "showDesktopHUD") {
@@ -235,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor             = .clear
         panel.hasShadow                   = true
         let hudLocked = UserDefaults.standard.bool(forKey: "hudLocked")
-        panel.isMovableByWindowBackground = !hudLocked
+        panel.isMovableByWindowBackground = false
         if hudLocked { panel.styleMask.remove(.resizable) }
         panel.hidesOnDeactivate           = false
         panel.becomesKeyOnlyIfNeeded      = true
@@ -258,7 +261,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentViewController = hosting
             panel.contentMinSize = NSSize(width: 420, height: 200)
         }
-        if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
+        var restoredSaved = false
+        if let sv = UserDefaults.standard.string(forKey: "hudFrameSaved-\(style)") {
+            let r = NSRectFromString(sv)
+            if r.width >= 100, r.height >= 100 { panel.setFrame(r, display: true); restoredSaved = true }
+        }
+        if !restoredSaved, !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
             // Device-aware defaults: sized from THIS display's visibleFrame,
             // which already excludes the menu bar and the Dock (the ribbon).
             let f = screen.visibleFrame
@@ -311,7 +319,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let locked = !UserDefaults.standard.bool(forKey: "hudLocked")
         UserDefaults.standard.set(locked, forKey: "hudLocked")
         if let p = hudWindow {
-            p.isMovableByWindowBackground = !locked
+            p.isMovableByWindowBackground = false
             if locked { p.styleMask.remove(.resizable) }
             else      { p.styleMask.insert(.resizable) }
         }
@@ -322,7 +330,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let script = "set volume output volume ((output volume of (get volume settings)) \(op) \(abs(delta)))"
         NSAppleScript(source: script)?.executeAndReturnError(nil)
     }
+    func currentVolume() -> Int {
+        let d = NSAppleScript(source: "output volume of (get volume settings)")?.executeAndReturnError(nil)
+        return Int(d?.int32Value ?? 50)
+    }
+    func setVolume(to v: Int) {
+        let clamped = max(0, min(100, v))
+        NSAppleScript(source: "set volume output volume \(clamped)")?.executeAndReturnError(nil)
+    }
 
+    /// Media transport via the active player (Spotify, then Music). `cmd` is an
+    /// AppleScript verb: "playpause", "next track", or "previous track".
+    func mediaControl(_ cmd: String) {
+        let players: Set<String> = ["com.spotify.client", "com.apple.Music"]
+        let running = NSWorkspace.shared.runningApplications.contains { players.contains($0.bundleIdentifier ?? "") }
+        if running {
+            sendMediaKey(cmd)                       // control the running player
+        } else if cmd == "playpause" {
+            // Nothing playing: launch Spotify (never Apple Music), then play.
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") {
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.sendMediaKey("playpause") }
+                }
+            }
+        }
+        // next/prev with nothing running: ignore
+    }
+    private func sendMediaKey(_ cmd: String) {
+        let key = cmd == "next track" ? 17 : (cmd == "previous track" ? 18 : 16)
+        func post(_ down: Bool) {
+            let flags = NSEvent.ModifierFlags(rawValue: UInt(down ? 0xA00 : 0xB00))
+            let data1 = (key << 16) | ((down ? 0xA : 0xB) << 8)
+            if let ev = NSEvent.otherEvent(with: .systemDefined, location: .zero,
+                                           modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                                           context: nil, subtype: 8, data1: data1, data2: -1) {
+                ev.cgEvent?.post(tap: .cghidEventTap)
+            }
+        }
+        post(true); post(false)
+    }
+    private static var prevMicVolume = 100
+    /// System mic mute toggle (input gain 0 / restore). No Accessibility needed.
+    func toggleMicMute() {
+        let cur = NSAppleScript(source: "input volume of (get volume settings)")?
+            .executeAndReturnError(nil).int32Value ?? 0
+        let script: String
+        if cur > 0 {
+            AppDelegate.prevMicVolume = Int(cur)
+            script = "set volume input volume 0"
+        } else {
+            script = "set volume input volume \(AppDelegate.prevMicVolume > 0 ? AppDelegate.prevMicVolume : 100)"
+        }
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+    }
+    /// Google Meet camera toggle (sends \u{2318}E to the frontmost window). Needs Accessibility.
+    func toggleGoogleCamera() {
+        let src = CGEventSource(stateID: .combinedSessionState)
+        let key = CGKeyCode(0x0E) // ANSI 'e'
+        if let down = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: true),
+           let up = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: false) {
+            down.flags = .maskCommand; up.flags = .maskCommand
+            down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+        }
+    }
     func openLauncherEditor() {
         if let win = launcherEditor {
             win.makeKeyAndOrderFront(nil)
@@ -469,6 +539,7 @@ private func hudThermColor(_ s: String) -> Color {
 struct AdaptiveHUDView: View {
     @ObservedObject var model: SystemStatsModel
     @AppStorage("hudTab") private var tab = "dash"
+    @AppStorage("dashCollapsed") private var dashCollapsed = false
 
     var body: some View {
         GeometryReader { g in
@@ -478,7 +549,20 @@ struct AdaptiveHUDView: View {
                 HUDHeader(model: model, tab: $tab)
                 if tab == "files" {
                     HUDFilesView()
+                } else if tab == "finance" {
+                    FinanceTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "charts" {
+                    TrendChartView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "oura" {
+                    OuraTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "messenger" {
+                    MessagesTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
+                if !dashCollapsed {
                 if wide {
                     HStack(alignment: .top, spacing: 16) {
                         HUDCPUSection(model: model)
@@ -511,15 +595,17 @@ struct AdaptiveHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                }
                 if wide {
-                    HStack(alignment: .bottom, spacing: 16) {
+                    HStack(alignment: .top, spacing: 16) {
                         HUDLauncherSection()
-                            .frame(maxWidth: 340, alignment: .bottomLeading)
+                            .frame(maxWidth: 340, alignment: .topLeading)
                         HUDTerminalSection()
-                            .frame(maxWidth: .infinity, minHeight: 110)
+                            .frame(maxWidth: .infinity, minHeight: 110, maxHeight: dashCollapsed ? .infinity : nil)
                     }
+                    .frame(maxHeight: dashCollapsed ? .infinity : nil)
                 } else {
-                    HUDTerminalSection().frame(minHeight: 110)
+                    HUDTerminalSection().frame(minHeight: 110, maxHeight: dashCollapsed ? .infinity : nil)
                     HUDLauncherSection()
                 }
                 }
@@ -534,6 +620,10 @@ struct AdaptiveHUDView: View {
 struct HUDHeader: View {
     @ObservedObject var model: SystemStatsModel
     @Binding var tab: String
+    @AppStorage("dashCollapsed") private var dashCollapsed = false
+    @AppStorage("hudLocked") private var hudLocked = false
+    @ObservedObject private var imsg = MessagesStore.shared
+    @State private var dragOffset: CGSize? = nil
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(hudThermColor(model.thermalState)).frame(width: 8, height: 8)
@@ -543,12 +633,52 @@ struct HUDHeader: View {
                 Text("FAN \(model.fanRPM) RPM")
                     .font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
             }
+            HStack(spacing: 3) {
+                Image(systemName: hudLocked ? "lock.fill" : "lock.open")
+                    .font(.system(size: 10)).foregroundColor(hudLocked ? .orange : .green)
+                Toggle("", isOn: Binding(get: { hudLocked },
+                                         set: { _ in AppDelegate.shared?.toggleHUDLock() }))
+                    .toggleStyle(.switch).labelsHidden().controlSize(.mini)
+                    .help(hudLocked ? "Locked — flip to unlock & move/resize" : "Unlocked — flip to lock")
+            }
+            if tab == "dash" {
+                Button { dashCollapsed.toggle() } label: {
+                    Image(systemName: dashCollapsed ? "chevron.down.square" : "chevron.up.square")
+                        .font(.system(size: 11)).foregroundColor(.gray)
+                }.buttonStyle(.plain).help("Collapse / expand metrics")
+            }
             Spacer()
             HUDTabButton(label: "DASH",  id: "dash",  tab: $tab)
             HUDTabButton(label: "FILES", id: "files", tab: $tab)
+            HUDTabButton(label: "FIN",   id: "finance", tab: $tab)
+            HUDTabButton(label: "CHARTS", id: "charts", tab: $tab)
+            HUDTabButton(label: "OURA", id: "oura", tab: $tab)
+            HUDTabButton(label: "iMSG", id: "messenger", tab: $tab, badge: imsg.unreadCount)
             Text(hudFmtW(model.totalPower))
                 .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
         }
+        .contentShape(Rectangle())
+        .onAppear { MessagesStore.shared.start() }
+        .gesture(
+            DragGesture(minimumDistance: 3)
+                .onChanged { _ in
+                    if UserDefaults.standard.bool(forKey: "hudLocked") { return }
+                    guard let win = NSApp.windows.first(where: { $0 is HUDPanel }) else { return }
+                    let m = NSEvent.mouseLocation   // absolute screen coords — no feedback
+                    if dragOffset == nil {
+                        dragOffset = CGSize(width: m.x - win.frame.origin.x, height: m.y - win.frame.origin.y)
+                    }
+                    let off = dragOffset!
+                    win.setFrameOrigin(NSPoint(x: m.x - off.width, y: m.y - off.height))
+                }
+                .onEnded { _ in
+                    dragOffset = nil
+                    if let win = NSApp.windows.first(where: { $0 is HUDPanel }) {
+                        let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
+                        UserDefaults.standard.set(NSStringFromRect(win.frame), forKey: "hudFrameSaved-\(style)")
+                    }
+                }
+        )
     }
 }
 
@@ -556,6 +686,7 @@ struct HUDTabButton: View {
     let label: String
     let id:    String
     @Binding var tab: String
+    var badge: Int = 0
     var body: some View {
         Button { tab = id } label: {
             Text(label)
@@ -564,6 +695,15 @@ struct HUDTabButton: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 5)
                     .fill(tab == id ? Color.white.opacity(0.85) : Color.gray.opacity(0.2)))
+                .overlay(alignment: .topTrailing) {
+                    if badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.system(size: 8, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.red).clipShape(Capsule())
+                            .offset(x: 6, y: -6)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
@@ -587,8 +727,8 @@ struct HUDBar: View {
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.gray.opacity(0.15))
-                    Capsule().fill(color ?? hudPctColor(pct))
-                        .frame(width: g.size.width * CGFloat(min(max(pct, 0), 100)) / 100)
+                    LiquidFill(level: Double(min(max(pct, 0), 100)) / 100, color: color ?? hudPctColor(pct))
+                        .clipShape(Capsule())
                 }
             }
             .frame(height: 6)
@@ -752,10 +892,18 @@ struct HUDNetBatterySection: View {
 
 // MARK: - Launcher store (persisted to UserDefaults as JSON)
 
+struct LauncherAccount: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var url: String
+    var badge: String? = nil
+}
 struct LauncherItem: Identifiable, Codable, Equatable {
     var id = UUID()
     var name: String
     var url: String
+    var badge: String? = nil   // poll kind: "gmail", "outlook", "financial", …
+    var accounts: [LauncherAccount]? = nil   // if set, clicking opens an account modal
 }
 
 final class LauncherStore: ObservableObject {
@@ -772,10 +920,7 @@ final class LauncherStore: ObservableObject {
             items = saved
         } else {
             items = [
-                LauncherItem(name: "M1",      url: "https://dashboard.m1.com"),
-                LauncherItem(name: "Monarch", url: "https://app.monarchmoney.com"),
-                LauncherItem(name: "Schwab",  url: "https://client.schwab.com"),
-                LauncherItem(name: "Gmail",   url: "https://mail.google.com"),
+                LauncherItem(name: "Google", url: "https://www.google.com"),
             ]
         }
     }
@@ -794,32 +939,86 @@ final class LauncherStore: ObservableObject {
 
 struct HUDLauncherSection: View {
     @ObservedObject var store = LauncherStore.shared
+    @ObservedObject var badges = BadgeStore.shared
     private let palette: [Color] = [.green, .blue, .orange, .pink, .teal, .indigo]
+    private let cols = [GridItem(.adaptive(minimum: 72), spacing: 6)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HUDSectionTitle(t: "LAUNCHER")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)],
-                      alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HUDCollapsibleGroup(id: "launcher", title: "LAUNCHER") {
+                LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
                     ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
                         LauncherButton(label: item.name,
-                                       color: palette[idx % palette.count]) {
+                                       color: palette[idx % palette.count],
+                                       badge: badges.total(for: item),
+                                       accounts: item.accounts ?? []) {
                             if let u = URL(string: item.url) { NSWorkspace.shared.open(u) }
                         }
                         .contextMenu {
                             Button("Remove \(item.name)") { store.remove(item) }
                         }
                     }
-                    LauncherButton(label: "Vol −", color: Color.gray.opacity(0.55)) {
-                        AppDelegate.shared?.adjustVolume(by: -10)
-                    }
-                    LauncherButton(label: "Vol +", color: Color.gray.opacity(0.55)) {
-                        AppDelegate.shared?.adjustVolume(by: 10)
-                    }
                     LauncherButton(label: "+", color: Color.gray.opacity(0.35)) {
                         AppDelegate.shared?.openLauncherEditor()
                     }
+                }
             }
+            HUDCollapsibleGroup(id: "media", title: "MEDIA") {
+                VStack(alignment: .leading, spacing: 6) {
+                    BatteryVolumeSlider().frame(maxWidth: 300)
+                    LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
+                        LauncherButton(label: "\u{23EE}", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.mediaControl("previous track")
+                        }
+                        LauncherButton(label: "\u{23EF}", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.mediaControl("playpause")
+                        }
+                        LauncherButton(label: "\u{23ED}", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.mediaControl("next track")
+                        }
+                        LauncherButton(label: "\u{1F3A4}", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.toggleMicMute()
+                        }
+                        LauncherButton(label: "\u{1F4F7}", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.toggleGoogleCamera()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A titled section whose body can be expanded/collapsed by tapping the header.
+/// Collapse state persists per id via @AppStorage("group.collapsed.<id>").
+struct HUDCollapsibleGroup<Content: View>: View {
+    let id: String
+    let title: String
+    let content: () -> Content
+    @AppStorage private var collapsed: Bool
+
+    init(id: String, title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.id = id
+        self.title = title
+        self.content = content
+        _collapsed = AppStorage(wrappedValue: false, "group.collapsed.\(id)")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { collapsed.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 7, weight: .bold)).foregroundColor(.gray)
+                    HUDSectionTitle(t: title)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if !collapsed { content() }
         }
     }
 }
@@ -827,9 +1026,12 @@ struct HUDLauncherSection: View {
 struct LauncherButton: View {
     let label:  String
     let color:  Color
+    var badge:  Int? = nil
+    var accounts: [LauncherAccount] = []
     let action: () -> Void
+    @State private var showAccounts = false
     var body: some View {
-        Button(action: action) {
+        Button(action: { if accounts.isEmpty { action() } else { showAccounts = true } }) {
             Text(label)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.white)
@@ -837,8 +1039,51 @@ struct LauncherButton: View {
                 .padding(.vertical, 7)
                 .frame(maxWidth: .infinity)
                 .background(RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.85)))
+                .overlay(alignment: .topLeading) {
+                    if let b = badge, b > 0 {
+                        Text("\(b)")
+                            .font(.system(size: 9, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.red).clipShape(Capsule())
+                            .offset(x: -5, y: -5)
+                    }
+                }
         }
         .buttonStyle(.plain)
+        .popover(isPresented: $showAccounts, arrowEdge: .bottom) {
+            AccountPopover(title: label, accounts: accounts)
+        }
+    }
+}
+
+struct AccountPopover: View {
+    let title: String
+    let accounts: [LauncherAccount]
+    @ObservedObject var badges = BadgeStore.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
+            ForEach(accounts) { acc in
+                Button {
+                    if let u = URL(string: acc.url) { NSWorkspace.shared.open(u) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if let n = badges.count(for: acc.badge) {
+                            Text("\(n)").font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.red).clipShape(Capsule())
+                        } else {
+                            Circle().fill(Color.gray.opacity(0.4)).frame(width: 7, height: 7)
+                        }
+                        Text(acc.name).font(.system(size: 12))
+                        Spacer(minLength: 16)
+                        Image(systemName: "arrow.up.forward.app").font(.system(size: 10)).foregroundColor(.secondary)
+                    }
+                    .frame(minWidth: 190).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(12)
     }
 }
 
@@ -1097,5 +1342,51 @@ struct HUDFilesView: View {
             else           { files.append(FileEntry(name: n, isDir: false, path: p)) }
         }
         entries = dirs + files
+    }
+}
+
+
+// MARK: - Badge poller
+// Renders a red unread/alert count on a launcher button. Reads
+// ~/.config/macmonitor/badges/<kind>.count, written every ~5 min by a plugin /
+// scheduled task (e.g. a Gmail-MCP task for "gmail", Outlook for "outlook",
+// a financial-alerts task for "financial"). The app stays decoupled from the
+// data source — any poller that writes the count file lights the badge.
+@MainActor
+final class BadgeStore: ObservableObject {
+    static let shared = BadgeStore()
+    @Published var counts: [String: Int] = [:]
+    private var timer: Timer?
+    private let dir = (NSHomeDirectory() as NSString).appendingPathComponent(".config/macmonitor/badges")
+
+    func start() {
+        reload()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.reload() }
+        }
+    }
+    func reload() {
+        var c: [String: Int] = [:]
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+            for f in files where f.hasSuffix(".count") {
+                let kind = String(f.dropLast(6))
+                let path = (dir as NSString).appendingPathComponent(f)
+                if let str = try? String(contentsOfFile: path, encoding: .utf8),
+                   let n = Int(str.trimmingCharacters(in: .whitespacesAndNewlines)) { c[kind] = n }
+            }
+        }
+        counts = c
+    }
+    func count(for kind: String?) -> Int? {
+        guard let k = kind, let n = counts[k], n > 0 else { return nil }
+        return n
+    }
+    func total(for item: LauncherItem) -> Int? {
+        if let accts = item.accounts, !accts.isEmpty {
+            let sum = accts.compactMap { count(for: $0.badge) }.reduce(0, +)
+            return sum > 0 ? sum : nil
+        }
+        return count(for: item.badge)
     }
 }

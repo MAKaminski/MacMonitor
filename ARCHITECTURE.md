@@ -142,3 +142,53 @@ flowchart LR
 | `scripts/build-dmg.sh` | Release build: archive → helper → ad-hoc sign → DMG |
 | `.github/workflows/release.yml` | Tag-triggered release pipeline |
 | `mcp/server.js` | MCP install/status/uninstall server |
+
+---
+
+## HUD tabs & data sources (2.2.0)
+
+The adaptive HUD (`AdaptiveHUDView` in `AppDelegate.swift`) hosts six tabs, each
+backed by its own store:
+
+| Tab | View / store | Source |
+|---|---|---|
+| DASH | `AdaptiveHUDView` + `SystemStatsModel` | in-process kernel sampling (0.5 s) |
+| FILES | file browser | working directory |
+| FIN | `FinanceStore` | M1 GraphQL poller → countdown / daily P-L |
+| CHARTS | `ChartsView` | ring buffers of metric history (1 s … 1 mo) |
+| OURA | `OuraService` / `OuraTab` | Oura API v2 (`~/.config/oura/token`) |
+| iMSG | `MessagesStore` / `ContactsResolver` | `~/Library/Messages/chat.db` + Contacts |
+
+### Badge pipeline (decoupled producer → consumer)
+
+```
+mail-poller.py (LaunchAgent, every 5 min) ──writes──▶ ~/.config/macmonitor/badges/<kind>.count
+                                                              │  polled (≤ 2 s)
+                                          BadgeStore ◀─────────┘
+                                              │ total(for: LauncherItem) sums per-account badges
+                                              ▼
+        LauncherButton (red overlay)   AccountPopover (per-account flags)   HUDTabButton (iMSG unread)
+```
+
+The app never knows *how* a count was produced — it only reads the `.count`
+files. Today the producer is an IMAP LaunchAgent
+(`de.modularequity.macmonitor.mailpoller`); swapping the producer requires no
+app change.
+
+### Window-position persistence
+
+`showHUD()` restores `hudFrameSaved-<style>` (an `NSStringFromRect`) **before**
+AppKit autosave or device defaults; the header drag writes it back on
+`.onEnded`. Because the frame is stored in absolute global coordinates and the
+restore is clamped to a live screen, the HUD returns to the same spot on the
+same monitor after an update or reinstall.
+
+### Agent-app permission prompts (LSUIElement)
+
+MacMonitor runs as `LSUIElement` (no Dock icon), so it cannot present a TCC
+consent prompt while it remains an accessory. Two workarounds are in play:
+
+- **Automation (Messages send):** route the AppleScript through a child
+  `/usr/bin/osascript` process, which surfaces the consent prompt.
+- **Contacts:** flip `NSApp.activationPolicy` to `.regular` + `activate` for the
+  first `CNContactStore.requestAccess`, then revert to `.accessory`.
