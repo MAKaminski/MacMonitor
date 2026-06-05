@@ -44,7 +44,42 @@ struct LiquidFill: View {
                 ctx.fill(band, with: .linearGradient(
                     Gradient(colors: [.clear, .white.opacity(0.30), .clear]),
                     startPoint: CGPoint(x: sx - 10, y: 0), endPoint: CGPoint(x: sx + 10, y: 0)))
+
+                // sparkles twinkling inside the liquid
+                for i in 0..<8 {
+                    let seed = Double(i + 1) * 1.61803
+                    let sxp = CGFloat((seed * 137.5).truncatingRemainder(dividingBy: 1.0)) * fillW
+                    let syp = CGFloat((seed * 73.31).truncatingRemainder(dividingBy: 1.0)) * h
+                    let tw = pow(sin(t * (1.4 + seed.truncatingRemainder(dividingBy: 0.9)) + seed * 7.0), 2)
+                    guard tw > 0.45 else { continue }
+                    let r: CGFloat = 0.8 + CGFloat(tw) * 1.1
+                    let dot = Path(ellipseIn: CGRect(x: sxp - r, y: syp - r, width: r * 2, height: r * 2))
+                    ctx.fill(dot, with: .color(.white.opacity(0.25 + 0.55 * tw)))
+                }
             }
+        }
+    }
+}
+
+/// "LED train" — rainbow segments marching around the HUD's edge.
+/// Overlay on the HUD root; hit-testing disabled by the caller.
+struct HUDEdgeRainbow: View {
+    var cornerRadius: CGFloat = 14
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let phase = CGFloat((t * 42).truncatingRemainder(dividingBy: 24))     // marching LEDs
+            let spin = Angle.degrees((t * 24).truncatingRemainder(dividingBy: 360)) // cycling rainbow
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .inset(by: 1.5)
+                .stroke(
+                    AngularGradient(gradient: Gradient(colors: [
+                        .red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .red
+                    ]), center: .center, angle: spin),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [9, 15], dashPhase: -phase)
+                )
+                .opacity(0.85)
+                .shadow(color: .white.opacity(0.15), radius: 3)
         }
     }
 }

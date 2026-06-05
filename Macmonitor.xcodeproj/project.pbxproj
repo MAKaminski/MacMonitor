@@ -461,6 +461,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = YES;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = Macmonitor/MacMonitor.entitlements;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSContactsUsageDescription = "MacMonitor shows your contacts' names next to iMessage conversations.";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacMonitor controls media playback (Spotify / Music) from the dashboard.";
@@ -513,6 +514,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = YES;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = Macmonitor/MacMonitor.entitlements;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSContactsUsageDescription = "MacMonitor shows your contacts' names next to iMessage conversations.";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacMonitor controls media playback (Spotify / Music) from the dashboard.";

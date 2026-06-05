@@ -261,6 +261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 rootView: AdaptiveHUDView(model: model)
                     .preferredColorScheme(.dark)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(HUDEdgeRainbow(cornerRadius: 14).allowsHitTesting(false))
                     .contextMenu { HUDMenuItems() }
             )
             hosting.sizingOptions = []   // the window controls size; the view fills it
@@ -376,6 +377,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Media transport via the active player (Spotify, then Music). `cmd` is an
     /// AppleScript verb: "playpause", "next track", or "previous track".
+    /// Turn the cursor into the system screenshot crosshair — synthesizes
+    /// the \u{21E7}\u{2318}4 chord so the user never has to press it.
+    @objc func snipScreen() {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 21, keyDown: true)   // kVK_ANSI_4
+        down?.flags = [.maskCommand, .maskShift]
+        let up = CGEvent(keyboardEventSource: src, virtualKey: 21, keyDown: false)
+        up?.flags = [.maskCommand, .maskShift]
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
+    }
+
     func mediaControl(_ cmd: String) {
         let players: Set<String> = ["com.spotify.client", "com.apple.Music"]
         let running = NSWorkspace.shared.runningApplications.contains { players.contains($0.bundleIdentifier ?? "") }
@@ -596,6 +609,9 @@ struct AdaptiveHUDView: View {
                 } else if tab == "messenger" {
                     MessagesTabView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "monarch" {
+                    MonarchTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                 if !dashCollapsed {
                 if wide {
@@ -687,6 +703,7 @@ struct HUDHeader: View {
             HUDTabButton(label: "FILES", id: "files", tab: $tab)
             HUDTabButton(label: "FIN",   id: "finance", tab: $tab)
             HUDTabButton(label: "CHARTS", id: "charts", tab: $tab)
+            HUDTabButton(label: "MNRCH", id: "monarch", tab: $tab)
             HUDTabButton(label: "OURA", id: "oura", tab: $tab)
             HUDTabButton(label: "iMSG", id: "messenger", tab: $tab, badge: imsg.unreadCount)
             Text(hudFmtW(model.totalPower))
@@ -1018,6 +1035,9 @@ struct HUDLauncherSection: View {
                         }
                         LauncherButton(label: "\u{1F4F7}", color: Color.gray.opacity(0.55)) {
                             AppDelegate.shared?.toggleGoogleCamera()
+                        }
+                        LauncherButton(label: "\u{2702} SNIP", color: Color.gray.opacity(0.55)) {
+                            AppDelegate.shared?.snipScreen()
                         }
                     }
                 }
