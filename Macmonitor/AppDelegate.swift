@@ -238,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor             = .clear
         panel.hasShadow                   = true
         let hudLocked = UserDefaults.standard.bool(forKey: "hudLocked")
-        panel.isMovableByWindowBackground = !hudLocked
+        panel.isMovableByWindowBackground = false
         if hudLocked { panel.styleMask.remove(.resizable) }
         panel.hidesOnDeactivate           = false
         panel.becomesKeyOnlyIfNeeded      = true
@@ -314,7 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let locked = !UserDefaults.standard.bool(forKey: "hudLocked")
         UserDefaults.standard.set(locked, forKey: "hudLocked")
         if let p = hudWindow {
-            p.isMovableByWindowBackground = !locked
+            p.isMovableByWindowBackground = false
             if locked { p.styleMask.remove(.resizable) }
             else      { p.styleMask.insert(.resizable) }
         }
@@ -337,6 +337,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Media transport via the active player (Spotify, then Music). `cmd` is an
     /// AppleScript verb: "playpause", "next track", or "previous track".
     func mediaControl(_ cmd: String) {
+        // Only act if a known player is already running, so an idle press never
+        // launches Apple Music. Media keys then route to the running player.
+        let players: Set<String> = ["com.spotify.client", "com.apple.Music"]
+        guard NSWorkspace.shared.runningApplications.contains(where: { players.contains($0.bundleIdentifier ?? "") }) else { return }
         // Universal media keys: NX_KEYTYPE_PLAY=16, NEXT=17, PREVIOUS=18.
         let key = cmd == "next track" ? 17 : (cmd == "previous track" ? 18 : 16)
         func post(_ down: Bool) {
@@ -520,6 +524,7 @@ private func hudThermColor(_ s: String) -> Color {
 struct AdaptiveHUDView: View {
     @ObservedObject var model: SystemStatsModel
     @AppStorage("hudTab") private var tab = "dash"
+    @AppStorage("dashCollapsed") private var dashCollapsed = false
 
     var body: some View {
         GeometryReader { g in
@@ -542,6 +547,7 @@ struct AdaptiveHUDView: View {
                     MessagesTabView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
+                if !dashCollapsed {
                 if wide {
                     HStack(alignment: .top, spacing: 16) {
                         HUDCPUSection(model: model)
@@ -574,15 +580,17 @@ struct AdaptiveHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                }
                 if wide {
                     HStack(alignment: .top, spacing: 16) {
                         HUDLauncherSection()
                             .frame(maxWidth: 340, alignment: .topLeading)
                         HUDTerminalSection()
-                            .frame(maxWidth: .infinity, minHeight: 110)
+                            .frame(maxWidth: .infinity, minHeight: 110, maxHeight: dashCollapsed ? .infinity : nil)
                     }
+                    .frame(maxHeight: dashCollapsed ? .infinity : nil)
                 } else {
-                    HUDTerminalSection().frame(minHeight: 110)
+                    HUDTerminalSection().frame(minHeight: 110, maxHeight: dashCollapsed ? .infinity : nil)
                     HUDLauncherSection()
                 }
                 }
@@ -597,6 +605,8 @@ struct AdaptiveHUDView: View {
 struct HUDHeader: View {
     @ObservedObject var model: SystemStatsModel
     @Binding var tab: String
+    @AppStorage("dashCollapsed") private var dashCollapsed = false
+    @State private var dragOrigin: CGPoint? = nil
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(hudThermColor(model.thermalState)).frame(width: 8, height: 8)
@@ -605,6 +615,12 @@ struct HUDHeader: View {
             if model.fanRPM > 0 {
                 Text("FAN \(model.fanRPM) RPM")
                     .font(.system(size: 9, design: .monospaced)).foregroundColor(.gray)
+            }
+            if tab == "dash" {
+                Button { dashCollapsed.toggle() } label: {
+                    Image(systemName: dashCollapsed ? "chevron.down.square" : "chevron.up.square")
+                        .font(.system(size: 11)).foregroundColor(.gray)
+                }.buttonStyle(.plain).help("Collapse / expand metrics")
             }
             Spacer()
             HUDTabButton(label: "DASH",  id: "dash",  tab: $tab)
@@ -616,6 +632,18 @@ struct HUDHeader: View {
             Text(hudFmtW(model.totalPower))
                 .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
         }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                .onChanged { v in
+                    if UserDefaults.standard.bool(forKey: "hudLocked") { return }
+                    guard let win = NSApp.windows.first(where: { $0 is HUDPanel }) else { return }
+                    if dragOrigin == nil { dragOrigin = win.frame.origin }
+                    let o = dragOrigin!
+                    win.setFrameOrigin(NSPoint(x: o.x + v.translation.width, y: o.y - v.translation.height))
+                }
+                .onEnded { _ in dragOrigin = nil }
+        )
     }
 }
 
