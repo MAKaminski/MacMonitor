@@ -9,6 +9,8 @@
 import SwiftUI
 import Combine
 import SQLite3
+import Contacts
+import AppKit
 
 struct IMConversation: Identifiable, Equatable {
     let id: Int64; let guid: String; let name: String; let snippet: String
@@ -23,13 +25,14 @@ final class MessagesStore: ObservableObject {
     @Published var messages: [IMMessage] = []
     @Published var selected: IMConversation?
     @Published var error: String?
+    @Published var unreadCount: Int = 0      // incoming unread, drives the iMSG tab badge
 
     private let dbPath = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Messages/chat.db")
     private var timer: Timer?
     private var started = false
 
     func start() {
-        if !started { started = true; refresh() }
+        if !started { started = true; ContactsResolver.shared.load(); refresh() }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -41,9 +44,11 @@ final class MessagesStore: ObservableObject {
         Task.detached {
             let convos = MessagesStore.queryConversations(path)
             let msgs = sel.map { MessagesStore.queryMessages(path, chatId: $0) }
+            let unread = MessagesStore.queryUnread(path)
             await MainActor.run {
                 self.conversations = convos.rows
                 self.error = convos.error
+                self.unreadCount = unread
                 if let m = msgs { self.messages = m }
             }
         }
@@ -104,12 +109,12 @@ final class MessagesStore: ObservableObject {
         }
         defer { sqlite3_close(db) }
         let sql = """
-        SELECT c.ROWID, c.guid,
-          COALESCE(NULLIF(c.display_name,''), c.chat_identifier) AS name,
+        SELECT c.ROWID, c.guid, c.display_name,
           (SELECT m.text FROM chat_message_join j JOIN message m ON m.ROWID=j.message_id
              WHERE j.chat_id=c.ROWID ORDER BY m.date DESC LIMIT 1) AS snippet,
           (SELECT MAX(m.date) FROM chat_message_join j JOIN message m ON m.ROWID=j.message_id
-             WHERE j.chat_id=c.ROWID) AS ldate
+             WHERE j.chat_id=c.ROWID) AS ldate,
+          c.chat_identifier
         FROM chat c WHERE ldate IS NOT NULL ORDER BY ldate DESC LIMIT 50;
         """
         var stmt: OpaquePointer?
@@ -121,8 +126,11 @@ final class MessagesStore: ObservableObject {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = sqlite3_column_int64(stmt, 0)
             let guid = text(stmt, 1) ?? ""
-            let name = text(stmt, 2) ?? "Unknown"
+            let disp = text(stmt, 2) ?? ""
             let snip = text(stmt, 3) ?? ""
+            let ident = text(stmt, 5) ?? ""
+            var name = disp.isEmpty ? ident : disp
+            if disp.isEmpty, let cn = ContactsResolver.shared.name(for: ident) { name = cn }
             out.append(IMConversation(id: id, guid: guid, name: name, snippet: snip))
         }
         return (out, nil)
@@ -149,6 +157,23 @@ final class MessagesStore: ObservableObject {
             out.append(IMMessage(id: id, text: body, fromMe: fromMe))
         }
         return out.reversed()
+    }
+
+    /// Incoming unread messages in the last 30 days — the "new messages" count,
+    /// not the entire is_read=0 backlog (the Mac's Messages DB keeps hundreds of
+    /// ancient unread rows it never marked read; those would wrongly show 99+).
+    nonisolated static func queryUnread(_ path: String) -> Int {
+        guard let db = open(path) else { return 0 }
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT COUNT(*) FROM message
+        WHERE is_from_me=0 AND is_read=0
+          AND (date/1000000000 + 978307200) > strftime('%s','now','-30 days');
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
     nonisolated private static func text(_ s: OpaquePointer?, _ i: Int32) -> String? {
@@ -178,6 +203,62 @@ final class MessagesStore: ObservableObject {
         }
         guard len > 0, i + len <= data.endIndex else { return nil }
         return String(data: data.subdata(in: i..<(i + len)), encoding: .utf8)
+    }
+}
+
+/// Resolves chat.db handles (phone numbers / emails) to Contacts names so the
+/// iMSG tab shows real names instead of raw numbers. Reads the Mac Contacts
+/// store once (which syncs from iCloud / iPhone). Requires Contacts permission.
+final class ContactsResolver {
+    static let shared = ContactsResolver()
+    private var phone: [String: String] = [:]   // last-10 digits → name
+    private var email: [String: String] = [:]   // lowercased email → name
+    private var loaded = false
+    private var loading = false
+
+    func load() {
+        if loaded || loading { return }
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        if status == .denied || status == .restricted { return }   // can't re-prompt; user enables in Settings
+        loading = true
+        // Agent (LSUIElement) apps can't show a TCC prompt unless they briefly
+        // become a regular, activatable app. Flip policy for the first prompt.
+        let flipped = (status == .notDetermined)
+        if flipped {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        let store = CNContactStore()
+        store.requestAccess(for: .contacts) { granted, _ in
+            if flipped { DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) } }
+            guard granted else { self.loading = false; return }
+            let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactOrganizationNameKey,
+                        CNContactPhoneNumbersKey, CNContactEmailAddressesKey] as [CNKeyDescriptor]
+            let req = CNContactFetchRequest(keysToFetch: keys)
+            var pm: [String: String] = [:], em: [String: String] = [:]
+            try? store.enumerateContacts(with: req) { c, _ in
+                let nm = [c.givenName, c.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+                let disp = nm.isEmpty ? c.organizationName : nm
+                guard !disp.isEmpty else { return }
+                for ph in c.phoneNumbers {
+                    let d = ph.value.stringValue.filter(\.isNumber)
+                    if d.count >= 10 { pm[String(d.suffix(10))] = disp }
+                }
+                for e in c.emailAddresses { em[(e.value as String).lowercased()] = disp }
+            }
+            DispatchQueue.main.async {
+                self.phone = pm; self.email = em; self.loaded = true; self.loading = false
+                MessagesStore.shared.refresh()      // re-render with names now available
+            }
+        }
+    }
+
+    func name(for identifier: String) -> String? {
+        if identifier.isEmpty { return nil }
+        if identifier.contains("@") { return email[identifier.lowercased()] }
+        let d = identifier.filter(\.isNumber)
+        if d.count >= 10 { return phone[String(d.suffix(10))] }
+        return nil
     }
 }
 
@@ -234,8 +315,14 @@ struct MessagesTabView: View {
                             ForEach(store.messages) { m in bubble(m).id(m.id) }
                         }.padding(12)
                     }
-                    .onChange(of: store.messages.count) { _ in
+                    .onChange(of: store.messages.last?.id) { _ in
                         if let last = store.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    }
+                    .onChange(of: store.selected?.id) { _ in     // jump to newest when opening a thread
+                        if let last = store.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                    .onAppear {
+                        if let last = store.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                 }
                 HStack(spacing: 8) {

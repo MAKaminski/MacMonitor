@@ -22,8 +22,30 @@ the widget, and cloning + building upstream produces the menu-bar app only.
 | Widget data collection | — | Self-contained in-process sampling: per-core CPU, MEM/swap, network, battery, thermal |
 | Dashboard refresh | 2 s tick | 0.5 s kernel-metric stream (`@Published` push); root-helper sensors stay at 2 s |
 | Menu-bar app | v2.x | Otherwise unchanged |
-| Desktop HUD | — | Adaptive control center: resizable breakpoint layout, DASH/FILES tabs, embedded zsh terminal (splittable), launcher tile grid, position lock, device-aware sizing that clears the Dock |
+| Desktop HUD | — | Adaptive control center: resizable breakpoint layout, DASH / FILES / FIN / CHARTS / OURA / iMSG tabs, embedded zsh terminal (splittable), launcher tile grid, position lock, device-aware sizing that clears the Dock |
 | Install paths | DMG + brew + script | Same, plus an **MCP server** so AI agents can install it directly |
+
+## Screenshots
+
+| Dashboard — live metrics, launcher, terminal | Trends |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Charts](docs/screenshots/charts.png) |
+
+The adaptive HUD on a 1280×480 secondary display: per-core CPU, memory, network,
+GPU, battery and power rails with **liquid-fill** bars; a launcher tile grid with
+live red badges; a **battery-shaped volume slider**; and a splittable embedded
+zsh terminal. Six tabs: **DASH / FILES / FIN / CHARTS / OURA / iMSG**.
+
+## Feature highlights (Kaminski fork)
+
+- **Six HUD tabs** — DASH (metrics + launcher + terminal), FILES, FIN (M1 / Apr 29 Fund),
+  CHARTS (per-metric trends, 1 s → 1 mo), OURA (Oura Ring health), iMSG (native iMessage).
+- **Native iMessage** — reads `chat.db`, resolves **Contacts names**, sends via Messages,
+  opens to the newest message, recent-unread badge.
+- **Live launcher badges** — per-app red counts (e.g. Gmail inbox-unread) from a
+  self-contained IMAP LaunchAgent, plus a **per-account modal** that breaks the count down.
+- **Persisted layout** — remembers position **and monitor** across reinstalls; lock/unlock
+  switch in the header; liquid-fill bars throughout.
 
 ## Install
 

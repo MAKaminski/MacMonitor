@@ -28,3 +28,6 @@ dist/
 timeline.xctimeline
 playground.xcplayground
 node_modules/
+
+# secrets
+*.token

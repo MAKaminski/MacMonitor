@@ -261,7 +261,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentViewController = hosting
             panel.contentMinSize = NSSize(width: 420, height: 200)
         }
-        if !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
+        var restoredSaved = false
+        if let sv = UserDefaults.standard.string(forKey: "hudFrameSaved-\(style)") {
+            let r = NSRectFromString(sv)
+            if r.width >= 100, r.height >= 100 { panel.setFrame(r, display: true); restoredSaved = true }
+        }
+        if !restoredSaved, !panel.setFrameUsingName("MacMonitorHUD-\(style)"), let screen = NSScreen.main {
             // Device-aware defaults: sized from THIS display's visibleFrame,
             // which already excludes the menu bar and the Dock (the ribbon).
             let f = screen.visibleFrame
@@ -617,6 +622,7 @@ struct HUDHeader: View {
     @Binding var tab: String
     @AppStorage("dashCollapsed") private var dashCollapsed = false
     @AppStorage("hudLocked") private var hudLocked = false
+    @ObservedObject private var imsg = MessagesStore.shared
     @State private var dragOffset: CGSize? = nil
     var body: some View {
         HStack(spacing: 8) {
@@ -647,11 +653,12 @@ struct HUDHeader: View {
             HUDTabButton(label: "FIN",   id: "finance", tab: $tab)
             HUDTabButton(label: "CHARTS", id: "charts", tab: $tab)
             HUDTabButton(label: "OURA", id: "oura", tab: $tab)
-            HUDTabButton(label: "iMSG", id: "messenger", tab: $tab)
+            HUDTabButton(label: "iMSG", id: "messenger", tab: $tab, badge: imsg.unreadCount)
             Text(hudFmtW(model.totalPower))
                 .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
         }
         .contentShape(Rectangle())
+        .onAppear { MessagesStore.shared.start() }
         .gesture(
             DragGesture(minimumDistance: 3)
                 .onChanged { _ in
@@ -664,7 +671,13 @@ struct HUDHeader: View {
                     let off = dragOffset!
                     win.setFrameOrigin(NSPoint(x: m.x - off.width, y: m.y - off.height))
                 }
-                .onEnded { _ in dragOffset = nil }
+                .onEnded { _ in
+                    dragOffset = nil
+                    if let win = NSApp.windows.first(where: { $0 is HUDPanel }) {
+                        let style = UserDefaults.standard.string(forKey: "hudStyle") ?? "full"
+                        UserDefaults.standard.set(NSStringFromRect(win.frame), forKey: "hudFrameSaved-\(style)")
+                    }
+                }
         )
     }
 }
@@ -673,6 +686,7 @@ struct HUDTabButton: View {
     let label: String
     let id:    String
     @Binding var tab: String
+    var badge: Int = 0
     var body: some View {
         Button { tab = id } label: {
             Text(label)
@@ -681,6 +695,15 @@ struct HUDTabButton: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 5)
                     .fill(tab == id ? Color.white.opacity(0.85) : Color.gray.opacity(0.2)))
+                .overlay(alignment: .topTrailing) {
+                    if badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.system(size: 8, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.red).clipShape(Capsule())
+                            .offset(x: 6, y: -6)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
