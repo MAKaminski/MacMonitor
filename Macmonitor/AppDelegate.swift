@@ -616,7 +616,7 @@ struct HUDHeader: View {
     @ObservedObject var model: SystemStatsModel
     @Binding var tab: String
     @AppStorage("dashCollapsed") private var dashCollapsed = false
-    @State private var dragOrigin: CGPoint? = nil
+    @State private var dragOffset: CGSize? = nil
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(hudThermColor(model.thermalState)).frame(width: 8, height: 8)
@@ -644,15 +644,18 @@ struct HUDHeader: View {
         }
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                .onChanged { v in
+            DragGesture(minimumDistance: 3)
+                .onChanged { _ in
                     if UserDefaults.standard.bool(forKey: "hudLocked") { return }
                     guard let win = NSApp.windows.first(where: { $0 is HUDPanel }) else { return }
-                    if dragOrigin == nil { dragOrigin = win.frame.origin }
-                    let o = dragOrigin!
-                    win.setFrameOrigin(NSPoint(x: o.x + v.translation.width, y: o.y - v.translation.height))
+                    let m = NSEvent.mouseLocation   // absolute screen coords — no feedback
+                    if dragOffset == nil {
+                        dragOffset = CGSize(width: m.x - win.frame.origin.x, height: m.y - win.frame.origin.y)
+                    }
+                    let off = dragOffset!
+                    win.setFrameOrigin(NSPoint(x: m.x - off.width, y: m.y - off.height))
                 }
-                .onEnded { _ in dragOrigin = nil }
+                .onEnded { _ in dragOffset = nil }
         )
     }
 }
