@@ -292,13 +292,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                display: true)
             }
         }
-        if let scr = NSScreen.main {
+        // Off-screen recovery: clamp against the display the HUD actually
+        // lives on (max overlap) — NOT NSScreen.main, which can be a different
+        // monitor. If any bounds were pushed off that display, pull them back
+        // in; if the window is larger than the display, SHRINK it so every
+        // edge sits within the monitor's visible bounds.
+        let owner = NSScreen.screens.max(by: { a, b in
+            let ia = a.frame.intersection(panel.frame)
+            let ib = b.frame.intersection(panel.frame)
+            return (ia.width * ia.height) < (ib.width * ib.height)
+        }) ?? NSScreen.main
+        if let scr = owner {
             let vf = scr.visibleFrame
             var fr = panel.frame
+            if fr.width  > vf.width  - 16 { fr.size.width  = max(vf.width  - 16, 320) }  // shrink to fit
+            if fr.height > vf.height - 16 { fr.size.height = max(vf.height - 16, 160) }
+            if fr.minX < vf.minX { fr.origin.x = vf.minX + 8 }
+            if fr.maxX > vf.maxX { fr.origin.x = vf.maxX - fr.width - 8 }
             if fr.minY < vf.minY { fr.origin.y = vf.minY + 8 }            // above the Dock
             if fr.maxY > vf.maxY { fr.origin.y = vf.maxY - fr.height - 8 }
-            if fr.maxX > vf.maxX { fr.origin.x = vf.maxX - fr.width - 8 }
-            if fr.minX < vf.minX { fr.origin.x = vf.minX + 8 }
             panel.setFrame(fr, display: true)
         }
         panel.setFrameAutosaveName("MacMonitorHUD-\(style)")

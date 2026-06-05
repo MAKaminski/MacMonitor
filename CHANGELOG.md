@@ -7,6 +7,20 @@ Dates: ISO 8601 (YYYY-MM-DD)
 
 ---
 
+## [2.3.1] — 2026-06-05
+
+### Fixed
+
+- **Off-screen recovery.** If the HUD was dragged so any part of it sat off its
+  monitor, quitting and relaunching now restores it **fully on-screen**: the
+  window is clamped against the display it actually occupies (chosen by
+  max-overlap, not `NSScreen.main`, which can be a different monitor in
+  multi-display setups), and if the window is larger than that display it
+  **shrinks itself** until every edge fits within the monitor's visible bounds.
+  Implementation: fit-to-screen pass at the end of `showHUD()`
+  (`AppDelegate.swift`) — shrink `width/height` to `visibleFrame − 16`
+  (floors: 320×160), then pull `minX/maxX/minY/maxY` inside with an 8 pt margin.
+
 ## [2.3.0] — 2026-06-05
 
 ### The "Control Center" Release
