@@ -7,6 +7,32 @@ Dates: ISO 8601 (YYYY-MM-DD)
 
 ---
 
+## [2.4.0] — 2026-06-06
+
+### Added
+
+- **MONARCH tab.** Live Monarch Money data via an authenticated session (cookie
+  + 1Password-token pollers), stacked 6-month charts, accordion sections, an
+  hourly refresh countdown, a SNIP button, and the rainbow-LED edge with liquid
+  sparkles.
+- **WHATNOT tab.** Live status backed by the `whatnot-service` contract.
+- **CALENDAR tab.** Upcoming events surfaced directly in the HUD.
+- **CLAUDE tab.** iMessage "Craft Auto Response" (burnt-orange) that drafts a
+  reply with Claude and fills the message draft only — it never sends.
+
+### Fixed
+
+- **Contacts / Apple Events entitlements.** Added the hardened-runtime
+  entitlements that TCC silently required, so permission prompts now appear and
+  Contacts / Apple Events access works.
+
+### Notes
+
+- Monarch durable token refresh needs a native Monarch password; the account is
+  Google SSO, so the cookie + 1Password-token pollers handle refresh for now.
+
+---
+
 ## [2.3.2] — 2026-06-05
 
 ### Added

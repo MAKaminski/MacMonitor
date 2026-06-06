@@ -31,3 +31,7 @@ node_modules/
 
 # secrets
 *.token
+
+# secrets — never commit
+*.token
+oura/token

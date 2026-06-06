@@ -138,7 +138,7 @@ struct MonarchSection<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if !collapsed { content().frame(height: 150) }
+            if !collapsed { content().frame(height: 160) }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
@@ -165,16 +165,20 @@ struct StackedBarChart: View {
                 let n = months.count
                 let totals = (0..<n).map { m in series.reduce(0.0) { $0 + (m < $1.2.count ? $1.2[m] : 0) } }
                 let peak = max(totals.max() ?? 1, 1)
+                let grand = totals.reduce(0, +)
                 HStack(alignment: .bottom, spacing: 8) {
                     ForEach(0..<n, id: \.self) { m in
-                        VStack(spacing: 2) {
-                            Text(fmtShort(totals[m]))
+                        VStack(spacing: 1) {
+                            Text("$" + fmtShort(totals[m]))
                                 .font(.system(size: 7, design: .monospaced)).foregroundColor(.secondary)
+                            Text(grand != 0 ? String(format: "%.0f%%", totals[m] / grand * 100) : "—")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundColor(.secondary.opacity(0.8))
                             VStack(spacing: 1) {
                                 ForEach(series.indices.reversed(), id: \.self) { i in
                                     let v = m < series[i].2.count ? series[i].2[m] : 0
                                     LiquidFill(level: 1.0, color: series[i].1)
-                                        .frame(height: max(CGFloat(v / peak) * (g.size.height - 34), v > 0 ? 2 : 0))
+                                        .frame(height: max(CGFloat(v / peak) * (g.size.height - 44), v > 0 ? 2 : 0))
                                         .clipShape(RoundedRectangle(cornerRadius: 2))
                                 }
                             }

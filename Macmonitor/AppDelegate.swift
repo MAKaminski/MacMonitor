@@ -615,6 +615,12 @@ struct AdaptiveHUDView: View {
                 } else if tab == "whatnot" {
                     WhatnotTabView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "calendar" {
+                    CalendarTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else if tab == "claude" {
+                    ClaudeTabView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                 if !dashCollapsed {
                 if wide {
@@ -706,10 +712,12 @@ struct HUDHeader: View {
             HUDTabButton(label: "FILES", id: "files", tab: $tab)
             HUDTabButton(label: "FIN",   id: "finance", tab: $tab)
             HUDTabButton(label: "CHARTS", id: "charts", tab: $tab)
+            HUDTabButton(label: "CAL", id: "calendar", tab: $tab)
             HUDTabButton(label: "MNRCH", id: "monarch", tab: $tab)
             HUDTabButton(label: "WTNT", id: "whatnot", tab: $tab)
             HUDTabButton(label: "OURA", id: "oura", tab: $tab)
             HUDTabButton(label: "iMSG", id: "messenger", tab: $tab, badge: imsg.unreadCount)
+            HUDTabButton(label: "CLAUDE", id: "claude", tab: $tab)
             Text(hudFmtW(model.totalPower))
                 .font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.yellow)
         }
