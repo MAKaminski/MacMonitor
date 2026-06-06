@@ -41,6 +41,14 @@ the widget, and cloning + building upstream produces the menu-bar app only.
 |---|---|
 | ![Calendar](docs/screenshots/calendar.png) | ![Claude](docs/screenshots/claude.png) |
 
+### More tabs
+
+| Finance — M1 / Apr 29 Fund | Oura — readiness, sleep, activity |
+|---|---|
+| ![Finance](docs/screenshots/finance.png) | ![Oura](docs/screenshots/oura.png) |
+
+![Messages — native iMessage](docs/screenshots/imsg.png)
+
 The adaptive HUD on a 1280×480 secondary display: per-core CPU, memory, network,
 GPU, battery and power rails with **liquid-fill** bars; a launcher tile grid with
 live red badges; a **battery-shaped volume slider**; and a splittable embedded
