@@ -31,10 +31,20 @@ the widget, and cloning + building upstream produces the menu-bar app only.
 |---|---|
 | ![Dashboard](docs/screenshots/dashboard.png) | ![Charts](docs/screenshots/charts.png) |
 
+### New in v2.4.0
+
+| Monarch — live cashflow & assets | Whatnot — Lace Luxx sales |
+|---|---|
+| ![Monarch](docs/screenshots/monarch.png) | ![Whatnot](docs/screenshots/whatnot.png) |
+
+| Calendar — Google + Outlook, next 7 days | Claude — multi-agent assistant |
+|---|---|
+| ![Calendar](docs/screenshots/calendar.png) | ![Claude](docs/screenshots/claude.png) |
+
 The adaptive HUD on a 1280×480 secondary display: per-core CPU, memory, network,
 GPU, battery and power rails with **liquid-fill** bars; a launcher tile grid with
 live red badges; a **battery-shaped volume slider**; and a splittable embedded
-zsh terminal. Six tabs: **DASH / FILES / FIN / CHARTS / OURA / iMSG**.
+zsh terminal. Tabs: **DASH / FILES / FIN / CHARTS / CAL / MONARCH / WHATNOT / OURA / iMSG / CLAUDE**.
 
 ## Feature highlights (Kaminski fork)
 
