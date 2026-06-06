@@ -1,13 +1,10 @@
-name: Update Homebrew Cask
+name: Update Homebrew Cask (legacy tap)
 
-# Runs automatically after a GitHub Release is published.
-# Downloads the new DMG, computes SHA256, and commits the updated
-# formula to ryyansafar/homebrew-macmonitor so users get it via
-#   brew upgrade --cask macmonitor
-#
-# REQUIRED SECRET: add a Personal Access Token with repo scope as
-#   Settings → Secrets → Actions → HOMEBREW_TAP_TOKEN
-# (see README — "Releasing a new version")
+# The in-repo Cask (Casks/macmonitor.rb) is bumped by release.yml on every tag
+# and is the supported `brew install --cask macmonitor` channel. This job only
+# mirrors that bump to the legacy ryyansafar/homebrew-macmonitor tap, and is a
+# no-op unless HOMEBREW_TAP_TOKEN is configured — so it never auto-fails on a
+# release (it used to fail in ~9s on a wrong-repo download URL).
 
 on:
   release:
@@ -15,48 +12,56 @@ on:
 
 jobs:
   update-cask:
-    name: Bump Cask version + SHA256
+    name: Bump legacy tap (skipped without token)
     runs-on: ubuntu-latest
-
     steps:
-      # ── 1. Extract version ─────────────────────────────────────────────────────
+      - name: Check tap token
+        id: gate
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "$TAP_TOKEN" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN not set — skipping legacy tap update (the in-repo cask already handles brew)."
+          fi
+
       - name: Extract version from tag
+        if: steps.gate.outputs.go == 'true'
         id: ver
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      # ── 2. Download DMG & compute SHA256 ───────────────────────────────────────
-      - name: Compute SHA256
+      - name: Download DMG and compute SHA256
+        if: steps.gate.outputs.go == 'true'
         id: sha
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
-          URL="https://github.com/ryyansafar/MacMonitor/releases/download/v${VERSION}/MacMonitor-${VERSION}.dmg"
+          URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/MacMonitor-${VERSION}.dmg"
           echo "Downloading: $URL"
           curl -fsSL "$URL" -o MacMonitor.dmg
-          SHA=$(shasum -a 256 MacMonitor.dmg | awk '{print $1}')
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 MacMonitor.dmg | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      # ── 3. Checkout homebrew-macmonitor tap ────────────────────────────────────
       - name: Checkout tap repo
+        if: steps.gate.outputs.go == 'true'
         uses: actions/checkout@v4
         with:
           repository: ryyansafar/homebrew-macmonitor
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
-      # ── 4. Patch Casks/macmonitor.rb ───────────────────────────────────────────
       - name: Update formula
+        if: steps.gate.outputs.go == 'true'
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
           SHA="${{ steps.sha.outputs.sha256 }}"
           sed -i "s/  version \".*\"/  version \"${VERSION}\"/" tap/Casks/macmonitor.rb
           sed -i "s/  sha256 \".*\"/  sha256 \"${SHA}\"/"       tap/Casks/macmonitor.rb
-          echo "Updated formula to v${VERSION} / ${SHA}"
 
-      # ── 5. Commit & push to tap ────────────────────────────────────────────────
       - name: Commit and push
+        if: steps.gate.outputs.go == 'true'
         run: |
           cd tap
           git config user.name  "github-actions[bot]"

@@ -39,11 +39,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/MacMonitor-*.dmg \
-            --title "MacMonitor $GITHUB_REF_NAME" \
-            --generate-notes \
-            --verify-tag
+          # Idempotent: create the release if it doesn't exist yet, otherwise
+          # upload/replace the DMG so a re-run never fails with "already exists".
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME exists — uploading DMG (--clobber)."
+            gh release upload "$GITHUB_REF_NAME" dist/MacMonitor-*.dmg --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/MacMonitor-*.dmg \
+              --title "MacMonitor $GITHUB_REF_NAME" \
+              --generate-notes \
+              --verify-tag
+          fi
 
       # ── 5. Compute DMG SHA256 ─────────────────────────────────────────────────
       - name: Compute SHA256
@@ -66,6 +73,7 @@ jobs:
           sed -i '' "s/^  sha256 \".*\"/  sha256 \"${SHA}\"/"       Casks/macmonitor.rb
 
       - name: Commit in-repo Cask update
+        continue-on-error: true   # a cask bump must never fail an already-published release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -74,8 +82,14 @@ jobs:
           git add Casks/macmonitor.rb
           git diff --staged --quiet && echo "No changes" && exit 0
           git commit -m "chore(cask): bump in-repo cask to v${{ steps.sha.outputs.version }}"
-          # Push the cask update to main so users tapping this repo get it.
-          git push origin HEAD:main
+          # Push the cask bump to main. The release runs from a detached HEAD at the
+          # tag, so if main advanced, rebase the bump onto the latest main and retry —
+          # prevents the non-fast-forward failures seen on earlier releases.
+          git push origin HEAD:main || {
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
+          }
 
       # ── 7. Update separate Homebrew tap repo ─────────────────────────────────
       # Kept as a secondary distribution channel for users on the legacy
