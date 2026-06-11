@@ -34,6 +34,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         MetricHistory.shared.start(model: model)
         OuraStore.shared.refresh()
         BadgeStore.shared.start()
+        // Start the Whatnot producer at launch (runs with the app's Full Disk
+        // Access) so the WTNT tab stays fresh even when it's never opened.
+        WhatnotStore.shared.start()
 
         // Restore the Desktop HUD if it was visible last session
         if UserDefaults.standard.bool(forKey: "showDesktopHUD") {
@@ -1040,6 +1043,8 @@ final class LauncherStore: ObservableObject {
         items.append(LauncherItem(name: name, url: url, group: group ?? defaultGroup))
     }
     func remove(_ item: LauncherItem) { items.removeAll { $0.id == item.id } }
+    /// Reorder the master array (used by the editor's drag handles; mirrors to the HUD).
+    func move(from src: IndexSet, to dst: Int) { items.move(fromOffsets: src, toOffset: dst) }
 
     func setGroup(_ item: LauncherItem, to group: String) {
         guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
@@ -1389,7 +1394,7 @@ struct LauncherGroupView: View {
     /// Hold a tile ~2 s to "arm" it (yellow + revolving rainbow), then drag over
     /// sibling tiles to reorder within this group. Release to drop.
     func reorderGesture(for item: LauncherItem) -> some Gesture {
-        LongPressGesture(minimumDuration: 2.0)
+        LongPressGesture(minimumDuration: 1.5)
             .sequenced(before: DragGesture(coordinateSpace: .named("lgrid")))
             .onChanged { value in
                 switch value {
@@ -1479,41 +1484,18 @@ struct LauncherEditorView: View {
 
             Divider()
 
-            // Scrollable list — holds as many buttons as you add.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
-                        HStack(spacing: 8) {
-                            // Live preview swatch — shows both chosen colors.
-                            Text(item.name)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(launcherFG(item))
-                                .lineLimit(1)
-                                .padding(.vertical, 4).padding(.horizontal, 8)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(launcherBG(item, idx)))
-                                .frame(width: 118, alignment: .leading)
-                            Text(item.url)
-                                .font(.system(size: 10)).foregroundColor(.gray).lineLimit(1)
-                            Spacer(minLength: 6)
-                            ColorPicker("", selection: bgBinding(idx), supportsOpacity: false)
-                                .labelsHidden().frame(width: 38).help("Background (primary) color")
-                            ColorPicker("", selection: fgBinding(idx), supportsOpacity: false)
-                                .labelsHidden().frame(width: 38).help("Text (secondary) color")
-                            Menu {
-                                ForEach(store.groups, id: \.self) { g in
-                                    Button(g) { store.setGroup(item, to: g) }
-                                        .disabled(g == store.group(of: item))
-                                }
-                            } label: {
-                                Text(store.group(of: item)).font(.system(size: 9)).lineLimit(1)
-                            }
-                            .frame(width: 80).help("Move to group")
-                            Button("Remove") { store.remove(item) }
-                        }
-                    }
+            // Drag the ≡ handle (or any row) to reorder — mirrors live to the HUD.
+            List {
+                ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
+                    rowView(idx: idx, item: item)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 3, leading: 4, bottom: 3, trailing: 4))
+                        .listRowSeparator(.hidden)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onMove { from, to in store.move(from: from, to: to) }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Text("The two swatches set each button's background (primary) and text (secondary) color; the dropdown moves it to another group. In the HUD, hold a button ~2 s to pick it up and drag to reorder within its group; right-click a button for Change Group / Add Group / Remove.")
@@ -1525,6 +1507,40 @@ struct LauncherEditorView: View {
         .onAppear {
             addGroup = store.editorPreselectGroup ?? store.defaultGroup
             store.editorPreselectGroup = nil
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(idx: Int, item: LauncherItem) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11)).foregroundColor(.gray)
+                .help("Drag to reorder")
+            // Live preview swatch — shows both chosen colors.
+            Text(item.name)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(launcherFG(item))
+                .lineLimit(1)
+                .padding(.vertical, 4).padding(.horizontal, 8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(launcherBG(item, idx)))
+                .frame(width: 118, alignment: .leading)
+            Text(item.url)
+                .font(.system(size: 10)).foregroundColor(.gray).lineLimit(1)
+            Spacer(minLength: 6)
+            ColorPicker("", selection: bgBinding(idx), supportsOpacity: false)
+                .labelsHidden().frame(width: 38).help("Background (primary) color")
+            ColorPicker("", selection: fgBinding(idx), supportsOpacity: false)
+                .labelsHidden().frame(width: 38).help("Text (secondary) color")
+            Menu {
+                ForEach(store.groups, id: \.self) { g in
+                    Button(g) { store.setGroup(item, to: g) }
+                        .disabled(g == store.group(of: item))
+                }
+            } label: {
+                Text(store.group(of: item)).font(.system(size: 9)).lineLimit(1)
+            }
+            .frame(width: 80).help("Move to group")
+            Button("Remove") { store.remove(item) }
         }
     }
 

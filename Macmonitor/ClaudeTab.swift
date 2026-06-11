@@ -42,6 +42,12 @@ final class ClaudeChatStore: ObservableObject {
     private let agentsPath = (NSHomeDirectory() as NSString)
         .appendingPathComponent(".config/macmonitor/claude_agents.json")
 
+    /// Bridge folder shared with the local "macmonitor-claude-agent" task
+    /// (separate from Craft Auto Response so usage tracks independently).
+    static let bridgeDir = (NSHomeDirectory() as NSString)
+        .appendingPathComponent("Documents/Claude/Projects/Personal/claude-agent-bridge")
+    private var pollTimer: Timer?
+
     static let defaultAgents: [ClaudeAgent] = [
         ClaudeAgent(name: "General", icon: "sparkles", system: nil),
         ClaudeAgent(name: "Coder", icon: "chevron.left.forwardslash.chevron.right",
@@ -88,12 +94,15 @@ final class ClaudeChatStore: ObservableObject {
         return t.isEmpty ? nil : t
     }
 
-    func checkKey() { keyPresent = apiKey != nil }
+    /// Bridge mode needs no API key in-app; the local task does the inference.
+    func checkKey() { keyPresent = true }
 
+    /// Route the message through the local "macmonitor-claude-agent" task:
+    /// write a request file, then watch for a response with the same nonce.
+    /// Trigger that task in Claude to service the request.
     func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !busy else { return }
-        guard let key = apiKey else { checkKey(); return }
         let agent = current
         conversations[agent, default: []].append(ClaudeMsg(role: "user", text: t))
         busy = true
@@ -101,36 +110,53 @@ final class ClaudeChatStore: ObservableObject {
             .filter { $0.role == "user" || $0.role == "assistant" }
             .suffix(24)
             .map { ["role": $0.role, "content": $0.text] }
-        var body: [String: Any] = ["model": model, "max_tokens": 1024,
-                                   "messages": Array(history)]
-        if let sys = currentAgent.system, !sys.isEmpty { body["system"] = sys }
-        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 60
-        req.setValue(key, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.setValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(for: req)
-                let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                if let blocks = j?["content"] as? [[String: Any]] {
-                    let out = blocks.compactMap { $0["text"] as? String }.joined()
-                    conversations[agent, default: []].append(
-                        ClaudeMsg(role: "assistant", text: out.isEmpty ? "(empty response)" : out))
-                } else if let err = (j?["error"] as? [String: Any])?["message"] as? String {
-                    conversations[agent, default: []].append(ClaudeMsg(role: "error", text: err))
-                } else {
-                    conversations[agent, default: []].append(
-                        ClaudeMsg(role: "error", text: "Unexpected response from API"))
-                }
-            } catch {
-                conversations[agent, default: []].append(
-                    ClaudeMsg(role: "error", text: error.localizedDescription))
-            }
+        let dir = Self.bridgeDir
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let nonce = UUID().uuidString
+        var request: [String: Any] = [
+            "nonce": nonce,
+            "status": "pending",
+            "createdAt": ISO8601DateFormatter().string(from: Date()),
+            "agent": agent,
+            "model": model,
+            "messages": Array(history),
+        ]
+        if let sys = currentAgent.system, !sys.isEmpty { request["system"] = sys }
+        let reqURL = URL(fileURLWithPath: dir).appendingPathComponent("request.json")
+        guard let data = try? JSONSerialization.data(withJSONObject: request, options: [.prettyPrinted]),
+              (try? data.write(to: reqURL)) != nil else {
+            conversations[agent, default: []].append(ClaudeMsg(role: "error", text: "Couldn't write the request file at \(dir)."))
             busy = false
+            return
         }
+        pollForReply(nonce: nonce, agent: agent)
+    }
+
+    private func pollForReply(nonce: String, agent: String) {
+        pollTimer?.invalidate()
+        let start = Date()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] tm in
+            let respURL = URL(fileURLWithPath: ClaudeChatStore.bridgeDir).appendingPathComponent("response.json")
+            if let d = try? Data(contentsOf: respURL),
+               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+               obj["nonce"] as? String == nonce,
+               let text = (obj["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty {
+                tm.invalidate()
+                Task { @MainActor in self?.finishReply(agent: agent, text: text, isError: false) }
+            } else if Date().timeIntervalSince(start) > 300 {
+                tm.invalidate()
+                Task { @MainActor in self?.finishReply(agent: agent,
+                    text: "No reply from the local task — run “macmonitor-claude-agent” in Claude, then resend.",
+                    isError: true) }
+            }
+        }
+    }
+
+    @MainActor private func finishReply(agent: String, text: String, isError: Bool) {
+        pollTimer?.invalidate(); pollTimer = nil
+        conversations[agent, default: []].append(ClaudeMsg(role: isError ? "error" : "assistant", text: text))
+        busy = false
     }
 }
 
@@ -211,7 +237,7 @@ struct ClaudeTabView: View {
                         }
                         ForEach(store.msgs) { m in ClaudeBubble(m: m) }
                         if store.busy {
-                            Text("Claude is thinking…")
+                            Text("Waiting for the local Claude task…")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.cyan).id("busy")
                         }
@@ -256,10 +282,11 @@ struct ClaudeTabView: View {
                 .font(.system(size: 10, weight: .bold)).tracking(1).foregroundColor(.gray)
                 .lineLimit(1)
             Spacer()
-            Circle().fill(store.keyPresent ? Color.green : Color.red).frame(width: 7, height: 7)
-            Text(store.keyPresent ? "key loaded" : "key missing")
+            Circle().fill(Color.green).frame(width: 7, height: 7)
+            Text("task bridge")
                 .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(store.keyPresent ? .green : .red)
+                .foregroundColor(.green)
+                .help("Messages route through the local macmonitor-claude-agent task")
             if !store.msgs.isEmpty {
                 Button { store.clearCurrent() } label: {
                     Image(systemName: "trash").font(.system(size: 9)).foregroundColor(.gray)

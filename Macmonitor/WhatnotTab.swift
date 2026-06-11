@@ -33,14 +33,41 @@ final class WhatnotStore: ObservableObject {
     @Published var data = WhatnotData()
     @Published var hasData = false
     private var timer: Timer?
+    private var producer: Timer?
     private let path = (NSHomeDirectory() as NSString)
         .appendingPathComponent(".config/macmonitor/whatnot.json")
+    private let serviceDir = (NSHomeDirectory() as NSString)
+        .appendingPathComponent("whatnot-service")
 
     func start() {
         load()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.load() }
+        }
+        // The whatnot-service LaunchAgent can't read the iCloud source file
+        // (no Full Disk Access). MacMonitor *does* have FDA, so run the
+        // producer ourselves on launch + every 15 min and reload after.
+        produce()
+        producer?.invalidate()
+        producer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.produce() }
+        }
+    }
+
+    private func produce() {
+        let dir = serviceDir
+        guard FileManager.default.fileExists(atPath: dir) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            p.arguments = ["-m", "whatnot_service.cli"]
+            p.currentDirectoryURL = URL(fileURLWithPath: dir)
+            p.standardOutput = nil
+            p.standardError = nil
+            do { try p.run() } catch { return }
+            p.waitUntilExit()
+            Task { @MainActor in WhatnotStore.shared.load() }
         }
     }
 

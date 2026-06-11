@@ -195,11 +195,55 @@ final class MessagesStore: ObservableObject {
             let disp = text(stmt, 2) ?? ""
             let snip = text(stmt, 3) ?? ""
             let ident = text(stmt, 5) ?? ""
-            var name = disp.isEmpty ? ident : disp
-            if disp.isEmpty, let cn = ContactsResolver.shared.name(for: ident) { name = cn }
+            let name = displayName(db: db, chatId: id, displayName: disp, identifier: ident)
             out.append(IMConversation(id: id, guid: guid, name: name, snippet: snip))
         }
         return (out, nil)
+    }
+
+    /// Best display name for a conversation: the chat's own display_name if set,
+    /// otherwise the contact name for a 1:1, otherwise a group title built from
+    /// the participants (so multi-person threads stop showing raw "chatNNN…").
+    nonisolated static func displayName(db: OpaquePointer?, chatId: Int64,
+                                        displayName disp: String, identifier ident: String) -> String {
+        if !disp.isEmpty { return disp }
+        let handles = queryHandles(db, chatId)
+        if handles.count >= 2 {
+            let firsts = handles.map { firstName(ContactsResolver.shared.name(for: $0) ?? shortHandle($0)) }
+            return groupTitle(firsts)
+        }
+        let h = handles.first ?? ident
+        return ContactsResolver.shared.name(for: h)
+            ?? ContactsResolver.shared.name(for: ident)
+            ?? (h.isEmpty ? ident : h)
+    }
+
+    nonisolated static func queryHandles(_ db: OpaquePointer?, _ chatId: Int64) -> [String] {
+        let sql = "SELECT h.id FROM chat_handle_join chj JOIN handle h ON h.ROWID=chj.handle_id WHERE chj.chat_id=\(chatId);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { if let s = text(stmt, 0) { out.append(s) } }
+        return out
+    }
+
+    nonisolated private static func firstName(_ full: String) -> String {
+        String(full.split(separator: " ").first ?? Substring(full))
+    }
+    nonisolated private static func shortHandle(_ h: String) -> String {
+        if h.contains("@") { return String(h.prefix(while: { $0 != "@" })) }
+        let d = h.filter(\.isNumber)
+        return d.count >= 4 ? "…\(d.suffix(4))" : h
+    }
+    /// "Keith, Lamar & Naomi" / "Keith, Lamar +3" — deduped, first three shown.
+    nonisolated private static func groupTitle(_ names: [String]) -> String {
+        var uniq: [String] = []
+        for n in names where !n.isEmpty && !uniq.contains(n) { uniq.append(n) }
+        if uniq.isEmpty { return "Group" }
+        if uniq.count == 1 { return uniq[0] }
+        if uniq.count <= 3 { return uniq.dropLast().joined(separator: ", ") + " & " + uniq.last! }
+        return uniq.prefix(3).joined(separator: ", ") + " +\(uniq.count - 3)"
     }
 
     nonisolated static func queryMessages(_ path: String, chatId: Int64) -> [IMMessage] {
