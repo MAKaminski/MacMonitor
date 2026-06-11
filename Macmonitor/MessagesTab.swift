@@ -11,6 +11,7 @@ import Combine
 import SQLite3
 import Contacts
 import AppKit
+import ApplicationServices
 
 struct IMConversation: Identifiable, Equatable {
     let id: Int64; let guid: String; let name: String; let snippet: String
@@ -174,6 +175,11 @@ final class MessagesStore: ObservableObject {
         alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // First-run: surface the Accessibility prompt the UI automation needs.
+        if !AXIsProcessTrusted() {
+            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(opts)
+        }
         runDeleteConversation(c)
     }
 
@@ -181,11 +187,20 @@ final class MessagesStore: ObservableObject {
         let esc = c.name
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        // Drive Messages.app via System Events: find the sidebar row whose text
-        // matches this conversation, select it, ⌘⌫, confirm the Delete sheet.
-        // Aborts safely if it can't find exactly one match (never guesses).
+        // A chunk of the last message — fallback match key when the sidebar
+        // label differs from our name (common for group threads).
+        let snipEsc = String(c.snippet.prefix(36))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        // Drive Messages.app via System Events: find the sidebar row matching
+        // this conversation (by name, else by last-message snippet), select it,
+        // ⌘⌫, then confirm the Delete sheet. Hierarchy-agnostic (scans the
+        // window's AXRows), and aborts safely unless exactly one row matches —
+        // it never guesses which thread to delete.
         let script = """
         set targetName to "\(esc)"
+        set targetSnippet to "\(snipEsc)"
         tell application "Messages" to activate
         delay 0.5
         tell application "System Events"
@@ -193,46 +208,50 @@ final class MessagesStore: ObservableObject {
             tell process "Messages"
                 set frontmost to true
                 delay 0.3
-                set theRows to {}
+                set nameHits to {}
+                set snipHits to {}
                 try
-                    set theRows to rows of table 1 of scroll area 1 of splitter group 1 of window 1
+                    repeat with e in (entire contents of window 1)
+                        try
+                            if (role of e) is "AXRow" then
+                                set rowText to ""
+                                repeat with sub in (entire contents of e)
+                                    try
+                                        if (role of sub) is "AXStaticText" then set rowText to rowText & (value of sub) & " ¶ "
+                                    end try
+                                end repeat
+                                if (targetName is not "") and (rowText contains targetName) then set end of nameHits to e
+                                if (targetSnippet is not "") and (rowText contains targetSnippet) then set end of snipHits to e
+                            end if
+                        end try
+                    end repeat
                 end try
-                if (count theRows) is 0 then
-                    try
-                        set theRows to rows of outline 1 of scroll area 1 of splitter group 1 of window 1
-                    end try
-                end if
-                if (count theRows) is 0 then return "ERR conversation list not found"
                 set hitRow to missing value
-                set hitCount to 0
-                repeat with r in theRows
-                    set rowText to ""
+                if (count nameHits) is 1 then
+                    set hitRow to item 1 of nameHits
+                else if ((count nameHits) is 0) and ((count snipHits) is 1) then
+                    set hitRow to item 1 of snipHits
+                end if
+                if hitRow is missing value then
+                    if (count nameHits) > 1 then return "ERR multiple matches for: " & targetName
+                    return "ERR no unique match for: " & targetName
+                end if
+                try
+                    set selected of hitRow to true
+                on error
                     try
-                        repeat with e in (entire contents of r)
-                            try
-                                if (role of e) is "AXStaticText" then set rowText to rowText & (value of e) & "  "
-                            end try
-                        end repeat
+                        perform action "AXOpen" of hitRow
                     end try
-                    if rowText contains targetName then
-                        set hitRow to r
-                        set hitCount to hitCount + 1
-                    end if
-                end repeat
-                if hitCount is 0 then return "ERR no match for: " & targetName
-                if hitCount > 1 then return "ERR multiple matches for: " & targetName
-                set selected of hitRow to true
+                end try
                 delay 0.4
                 key code 51 using command down
                 delay 0.6
-                try
-                    click button "Delete" of sheet 1 of window 1
-                    return "OK"
-                end try
-                try
-                    click button "Delete" of sheet 1 of front window
-                    return "OK"
-                end try
+                repeat with w in windows
+                    try
+                        click button "Delete" of sheet 1 of w
+                        return "OK"
+                    end try
+                end repeat
                 return "ERR could not confirm the Delete sheet"
             end tell
         end tell

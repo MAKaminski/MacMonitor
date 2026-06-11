@@ -22,6 +22,14 @@ Dates: ISO 8601 (YYYY-MM-DD)
   snaps into place on release.
 - **Editor drag handles.** The launcher editor is scrollable (no fixed button cap), with a
   ≡ handle on each row to drag-reorder; changes mirror live to the HUD.
+- **Delete iMessage conversations.** Right-click a thread in the iMSG tab → **Delete
+  Conversation…** removes it through Messages.app, so the deletion syncs to your iPhone and
+  other devices via Messages in iCloud; the contact is never touched. Matches the thread by
+  name or last-message snippet and aborts safely unless exactly one matches; surfaces the
+  Accessibility prompt on first use.
+- **Remove empty launcher groups.** Once a group has no buttons, remove it from the editor
+  (✕ on the group chip) or the HUD (right-click the group's **+** tile). Non-empty groups
+  can't be removed.
 
 ### Changed
 
