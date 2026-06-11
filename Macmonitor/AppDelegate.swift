@@ -448,8 +448,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let win = NSWindow(
-            contentRect:  NSRect(x: 0, y: 0, width: 480, height: 340),
-            styleMask:    [.titled, .closable],
+            contentRect:  NSRect(x: 0, y: 0, width: 520, height: 480),
+            styleMask:    [.titled, .closable, .resizable],
             backing:      .buffered,
             defer:        false
         )
@@ -462,6 +462,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         launcherEditor = win
+    }
+
+    /// Prompt for a new launcher-group name and add it to the store.
+    func promptAddGroup() {
+        let alert = NSAlert()
+        alert.messageText = "Add Launcher Group"
+        alert.informativeText = "Name the new group:"
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        tf.placeholderString = "Group name"
+        alert.accessoryView = tf
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = tf
+        if alert.runModal() == .alertFirstButtonReturn {
+            LauncherStore.shared.addGroup(tf.stringValue)
+        }
     }
 }
 
@@ -970,15 +987,25 @@ struct LauncherItem: Identifiable, Codable, Equatable {
     var url: String
     var badge: String? = nil   // poll kind: "gmail", "outlook", "financial", …
     var accounts: [LauncherAccount]? = nil   // if set, clicking opens an account modal
+    var bgHex: String? = nil   // primary color (button background); nil → palette default
+    var fgHex: String? = nil   // secondary color (button text); nil → white
+    var group: String? = nil   // launcher group name; nil → default (first) group
 }
 
 final class LauncherStore: ObservableObject {
     static let shared = LauncherStore()
     private static let key = "hudLaunchers"
+    private static let groupsKey = "hudLauncherGroups"
 
     @Published var items: [LauncherItem] {
         didSet { persist() }
     }
+    /// Ordered list of launcher groups (each renders as its own HUD section).
+    @Published var groups: [String] {
+        didSet { UserDefaults.standard.set(groups, forKey: Self.groupsKey) }
+    }
+    /// Transient: which group the editor's "Add" row should preselect (not persisted).
+    @Published var editorPreselectGroup: String? = nil
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
@@ -989,10 +1016,62 @@ final class LauncherStore: ObservableObject {
                 LauncherItem(name: "Google", url: "https://www.google.com"),
             ]
         }
+        if let g = UserDefaults.standard.stringArray(forKey: Self.groupsKey), !g.isEmpty {
+            groups = g
+        } else {
+            groups = ["LAUNCHER"]
+        }
+        ensureGroupsCoverItems()
     }
 
-    func add(name: String, url: String) { items.append(LauncherItem(name: name, url: url)) }
-    func remove(_ item: LauncherItem)   { items.removeAll { $0.id == item.id } }
+    var defaultGroup: String { groups.first ?? "LAUNCHER" }
+
+    /// The group an item belongs to (falls back to the first group).
+    func group(of item: LauncherItem) -> String {
+        if let g = item.group, groups.contains(g) { return g }
+        return defaultGroup
+    }
+    /// Items in a group, preserving their order in the master array.
+    func items(in group: String) -> [LauncherItem] {
+        items.filter { self.group(of: $0) == group }
+    }
+
+    func add(name: String, url: String, group: String? = nil) {
+        items.append(LauncherItem(name: name, url: url, group: group ?? defaultGroup))
+    }
+    func remove(_ item: LauncherItem) { items.removeAll { $0.id == item.id } }
+
+    func setGroup(_ item: LauncherItem, to group: String) {
+        guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[i].group = group
+    }
+
+    func addGroup(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty, !groups.contains(n) else { return }
+        groups.append(n)
+    }
+    func renameGroup(_ old: String, to new: String) {
+        let n = new.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty, !groups.contains(n), let i = groups.firstIndex(of: old) else { return }
+        groups[i] = n
+        for idx in items.indices where items[idx].group == old { items[idx].group = n }
+    }
+    /// Remove a group; its buttons fall back to the first remaining group.
+    func removeGroup(_ name: String) {
+        guard groups.count > 1, let i = groups.firstIndex(of: name) else { return }
+        let fallback = groups.first(where: { $0 != name }) ?? "LAUNCHER"
+        for idx in items.indices where group(of: items[idx]) == name { items[idx].group = fallback }
+        groups.remove(at: i)
+    }
+
+    /// Make sure every group referenced by an item exists, and there's ≥1 group.
+    private func ensureGroupsCoverItems() {
+        for it in items where it.group != nil && !groups.contains(it.group!) {
+            groups.append(it.group!)
+        }
+        if groups.isEmpty { groups = ["LAUNCHER"] }
+    }
 
     private func persist() {
         if let data = try? JSONEncoder().encode(items) {
@@ -1003,54 +1082,140 @@ final class LauncherStore: ObservableObject {
 
 // MARK: - Launcher row in the HUD
 
+// MARK: - Launcher color + reorder helpers
+
+let launcherPalette: [Color] = [.green, .blue, .orange, .pink, .teal, .indigo]
+
+/// Effective background (primary) color for a launcher item.
+func launcherBG(_ item: LauncherItem, _ idx: Int) -> Color {
+    if let h = item.bgHex, !h.isEmpty { return Color(hex: h) }
+    return launcherPalette[idx % launcherPalette.count]
+}
+/// Effective text (secondary) color for a launcher item.
+func launcherFG(_ item: LauncherItem) -> Color {
+    if let h = item.fgHex, !h.isEmpty { return Color(hex: h) }
+    return .white
+}
+
+extension Color {
+    /// "#RRGGBB" string for persisting a chosen color (pairs with init(hex:)).
+    var hexRGB: String {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor.white
+        let r = Int((ns.redComponent   * 255).rounded())
+        let g = Int((ns.greenComponent * 255).rounded())
+        let b = Int((ns.blueComponent  * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
+}
+
+/// Records each launcher tile's frame in the grid's coordinate space so a
+/// long-press drag can tell which tile the finger is currently over.
+struct LauncherFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+/// Fast revolving rainbow border (same palette as the HUD edge) shown when a
+/// launcher tile is "armed" for moving.
+struct ArmedRainbowBorder: View {
+    var cornerRadius: CGFloat = 7
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let spin = Angle.degrees((t * 220).truncatingRemainder(dividingBy: 360))
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .strokeBorder(
+                    AngularGradient(gradient: Gradient(colors: [
+                        .red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .red
+                    ]), center: .center, angle: spin),
+                    lineWidth: 3
+                )
+        }
+    }
+}
+
+/// A launcher tile in the HUD grid: custom primary (background) + secondary
+/// (text) colors, account popover, and a "hold 2 s to move" highlight.
+struct LauncherTile: View {
+    let item:  LauncherItem
+    let idx:   Int
+    let armed: Bool
+    let badge: Int
+    @State private var showAccounts = false
+
+    var body: some View {
+        let bg = launcherBG(item, idx)
+        let fg = launcherFG(item)
+        Text(item.name)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(armed ? .black : fg)
+            .lineLimit(1)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(armed ? Color.yellow : bg.opacity(0.85))
+            )
+            .overlay(alignment: .topLeading) {
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 9, weight: .bold)).foregroundColor(.white)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.red).clipShape(Capsule())
+                        .offset(x: -5, y: -5)
+                }
+            }
+            .overlay { if armed { ArmedRainbowBorder(cornerRadius: 7) } }
+            .scaleEffect(armed ? 1.12 : 1.0)
+            .shadow(color: armed ? Color.yellow.opacity(0.9) : .clear, radius: armed ? 9 : 0)
+            .zIndex(armed ? 1 : 0)
+            .popover(isPresented: $showAccounts, arrowEdge: .bottom) {
+                AccountPopover(title: item.name, accounts: item.accounts ?? [])
+            }
+            .onTapGesture {
+                if let accts = item.accounts, !accts.isEmpty { showAccounts = true }
+                else if let u = URL(string: item.url) { NSWorkspace.shared.open(u) }
+            }
+    }
+}
+
 struct HUDLauncherSection: View {
     @ObservedObject var store = LauncherStore.shared
     @ObservedObject var badges = BadgeStore.shared
-    private let palette: [Color] = [.green, .blue, .orange, .pink, .teal, .indigo]
     private let cols = [GridItem(.adaptive(minimum: 72), spacing: 6)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HUDCollapsibleGroup(id: "launcher", title: "LAUNCHER") {
-                LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
-                    ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
-                        LauncherButton(label: item.name,
-                                       color: palette[idx % palette.count],
-                                       badge: badges.total(for: item),
-                                       accounts: item.accounts ?? []) {
-                            if let u = URL(string: item.url) { NSWorkspace.shared.open(u) }
-                        }
-                        .contextMenu {
-                            Button("Remove \(item.name)") { store.remove(item) }
-                        }
-                    }
-                    LauncherButton(label: "+", color: Color.gray.opacity(0.35)) {
-                        AppDelegate.shared?.openLauncherEditor()
-                    }
-                }
+            ForEach(store.groups, id: \.self) { g in
+                LauncherGroupView(group: g)
             }
-            HUDCollapsibleGroup(id: "media", title: "MEDIA") {
-                VStack(alignment: .leading, spacing: 6) {
-                    BatteryVolumeSlider().frame(maxWidth: 300)
-                    LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
-                        LauncherButton(label: "\u{23EE}", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.mediaControl("previous track")
-                        }
-                        LauncherButton(label: "\u{23EF}", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.mediaControl("playpause")
-                        }
-                        LauncherButton(label: "\u{23ED}", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.mediaControl("next track")
-                        }
-                        LauncherButton(label: "\u{1F3A4}", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.toggleMicMute()
-                        }
-                        LauncherButton(label: "\u{1F4F7}", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.toggleGoogleCamera()
-                        }
-                        LauncherButton(label: "\u{2702} SNIP", color: Color.gray.opacity(0.55)) {
-                            AppDelegate.shared?.snipScreen()
-                        }
+            mediaGroup
+        }
+    }
+
+    private var mediaGroup: some View {
+        HUDCollapsibleGroup(id: "media", title: "MEDIA") {
+            VStack(alignment: .leading, spacing: 6) {
+                BatteryVolumeSlider().frame(maxWidth: 300)
+                LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
+                    LauncherButton(label: "\u{23EE}", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.mediaControl("previous track")
+                    }
+                    LauncherButton(label: "\u{23EF}", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.mediaControl("playpause")
+                    }
+                    LauncherButton(label: "\u{23ED}", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.mediaControl("next track")
+                    }
+                    LauncherButton(label: "\u{1F3A4}", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.toggleMicMute()
+                    }
+                    LauncherButton(label: "\u{1F4F7}", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.toggleGoogleCamera()
+                    }
+                    LauncherButton(label: "\u{2702} SNIP", color: Color.gray.opacity(0.55)) {
+                        AppDelegate.shared?.snipScreen()
                     }
                 }
             }
@@ -1156,48 +1321,224 @@ struct AccountPopover: View {
     }
 }
 
+/// One launcher group rendered as a collapsible HUD section. Owns its own
+/// coordinate space + arm/drag state so reordering stays within the group.
+struct LauncherGroupView: View {
+    @ObservedObject var store  = LauncherStore.shared
+    @ObservedObject var badges = BadgeStore.shared
+    let group: String
+    private let cols = [GridItem(.adaptive(minimum: 72), spacing: 6)]
+    @State private var armedID: UUID? = nil
+    @State private var frames:  [UUID: CGRect] = [:]
+
+    var body: some View {
+        HUDCollapsibleGroup(id: "launcher.\(group)", title: group) {
+            LazyVGrid(columns: cols, alignment: .leading, spacing: 6) {
+                ForEach(store.items(in: group)) { item in
+                    tileCell(item)
+                }
+                addTile
+            }
+            .coordinateSpace(name: "lgrid")
+            .onPreferenceChange(LauncherFramesKey.self) { frames = $0 }
+        }
+    }
+
+    private var addTile: some View {
+        LauncherButton(label: "+", color: Color.gray.opacity(0.35)) {
+            store.editorPreselectGroup = group
+            AppDelegate.shared?.openLauncherEditor()
+        }
+        .contextMenu {
+            Button("Add Group…") { AppDelegate.shared?.promptAddGroup() }
+            if store.groups.count > 1 {
+                Button("Remove Group “\(group)”") { store.removeGroup(group) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tileCell(_ item: LauncherItem) -> some View {
+        let pidx = store.items.firstIndex(where: { $0.id == item.id }) ?? 0
+        LauncherTile(item: item, idx: pidx,
+                     armed: armedID == item.id,
+                     badge: badges.total(for: item) ?? 0)
+            .background(GeometryReader { g in
+                Color.clear.preference(
+                    key: LauncherFramesKey.self,
+                    value: [item.id: g.frame(in: .named("lgrid"))]
+                )
+            })
+            .gesture(reorderGesture(for: item))
+            .contextMenu { tileMenu(item) }
+    }
+
+    @ViewBuilder
+    private func tileMenu(_ item: LauncherItem) -> some View {
+        Menu("Change Group") {
+            ForEach(store.groups, id: \.self) { g in
+                Button(g) { store.setGroup(item, to: g) }
+                    .disabled(g == store.group(of: item))   // current group greyed out
+            }
+        }
+        Button("Add Group…") { AppDelegate.shared?.promptAddGroup() }
+        Divider()
+        Button("Remove \(item.name)") { store.remove(item) }
+    }
+
+    /// Hold a tile ~2 s to "arm" it (yellow + revolving rainbow), then drag over
+    /// sibling tiles to reorder within this group. Release to drop.
+    func reorderGesture(for item: LauncherItem) -> some Gesture {
+        LongPressGesture(minimumDuration: 2.0)
+            .sequenced(before: DragGesture(coordinateSpace: .named("lgrid")))
+            .onChanged { value in
+                switch value {
+                case .first(true):
+                    if armedID != item.id {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+                            armedID = item.id
+                        }
+                    }
+                case .second(true, let drag?):
+                    if armedID == nil { armedID = item.id }
+                    if let targetID = frames.first(where: { $0.value.contains(drag.location) })?.key,
+                       targetID != armedID {
+                        moveArmed(to: targetID)
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { armedID = nil }
+            }
+    }
+
+    private func moveArmed(to targetID: UUID) {
+        guard let armed = armedID,
+              let from = store.items.firstIndex(where: { $0.id == armed }),
+              let to   = store.items.firstIndex(where: { $0.id == targetID }),
+              from != to else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            let moved = store.items.remove(at: from)
+            store.items.insert(moved, at: to)
+        }
+    }
+}
+
 // MARK: - Launcher editor window
 
 struct LauncherEditorView: View {
     @ObservedObject var store = LauncherStore.shared
     @State private var name = ""
     @State private var url  = "https://"
+    @State private var addGroup = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Launcher Buttons")
-                .font(.system(size: 14, weight: .bold))
-            ForEach(store.items) { item in
-                HStack {
-                    Text(item.name)
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 90, alignment: .leading)
-                    Text(item.url)
-                        .font(.system(size: 10)).foregroundColor(.gray).lineLimit(1)
-                    Spacer()
-                    Button("Remove") { store.remove(item) }
-                }
+            HStack {
+                Text("Launcher Buttons")
+                    .font(.system(size: 14, weight: .bold))
+                Spacer()
+                Text("\(store.items.count) button\(store.items.count == 1 ? "" : "s") · \(store.groups.count) group\(store.groups.count == 1 ? "" : "s")")
+                    .font(.system(size: 10)).foregroundColor(.gray)
             }
-            Divider()
+
+            // Groups: chips + add a new group.
+            HStack(spacing: 6) {
+                Text("Groups").font(.system(size: 10, weight: .semibold)).foregroundColor(.gray)
+                ForEach(store.groups, id: \.self) { g in
+                    Text(g)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.22)))
+                }
+                Button("＋ Group") { AppDelegate.shared?.promptAddGroup() }
+                    .font(.system(size: 10))
+                Spacer(minLength: 0)
+            }
+
+            // Add row pinned at the top so it's always reachable.
             HStack {
                 TextField("Name", text: $name)
-                    .textFieldStyle(.roundedBorder).frame(width: 110)
+                    .textFieldStyle(.roundedBorder).frame(width: 100)
                 TextField("https://…", text: $url)
                     .textFieldStyle(.roundedBorder)
+                Picker("", selection: $addGroup) {
+                    ForEach(store.groups, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 104).help("Group for the new button")
                 Button("Add") {
                     let trimmed = name.trimmingCharacters(in: .whitespaces)
                     guard !trimmed.isEmpty, let u = URL(string: url), u.scheme != nil else { return }
-                    store.add(name: trimmed, url: url)
+                    store.add(name: trimmed, url: url, group: addGroup.isEmpty ? nil : addGroup)
                     name = ""
                     url  = "https://"
                 }
             }
-            Text("Buttons show in the Desktop HUD's LAUNCHER row. Right-click a button in the HUD to remove it.")
+
+            Divider()
+
+            // Scrollable list — holds as many buttons as you add.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(store.items.enumerated()), id: \.element.id) { idx, item in
+                        HStack(spacing: 8) {
+                            // Live preview swatch — shows both chosen colors.
+                            Text(item.name)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(launcherFG(item))
+                                .lineLimit(1)
+                                .padding(.vertical, 4).padding(.horizontal, 8)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(launcherBG(item, idx)))
+                                .frame(width: 118, alignment: .leading)
+                            Text(item.url)
+                                .font(.system(size: 10)).foregroundColor(.gray).lineLimit(1)
+                            Spacer(minLength: 6)
+                            ColorPicker("", selection: bgBinding(idx), supportsOpacity: false)
+                                .labelsHidden().frame(width: 38).help("Background (primary) color")
+                            ColorPicker("", selection: fgBinding(idx), supportsOpacity: false)
+                                .labelsHidden().frame(width: 38).help("Text (secondary) color")
+                            Menu {
+                                ForEach(store.groups, id: \.self) { g in
+                                    Button(g) { store.setGroup(item, to: g) }
+                                        .disabled(g == store.group(of: item))
+                                }
+                            } label: {
+                                Text(store.group(of: item)).font(.system(size: 9)).lineLimit(1)
+                            }
+                            .frame(width: 80).help("Move to group")
+                            Button("Remove") { store.remove(item) }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Text("The two swatches set each button's background (primary) and text (secondary) color; the dropdown moves it to another group. In the HUD, hold a button ~2 s to pick it up and drag to reorder within its group; right-click a button for Change Group / Add Group / Remove.")
                 .font(.system(size: 10)).foregroundColor(.gray)
-            Spacer(minLength: 0)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .frame(width: 480, height: 320)
+        .frame(minWidth: 520, idealWidth: 520, minHeight: 380, idealHeight: 480)
+        .onAppear {
+            addGroup = store.editorPreselectGroup ?? store.defaultGroup
+            store.editorPreselectGroup = nil
+        }
+    }
+
+    private func bgBinding(_ idx: Int) -> Binding<Color> {
+        Binding(
+            get: { idx < store.items.count ? launcherBG(store.items[idx], idx) : .gray },
+            set: { if idx < store.items.count { store.items[idx].bgHex = $0.hexRGB } }
+        )
+    }
+    private func fgBinding(_ idx: Int) -> Binding<Color> {
+        Binding(
+            get: { idx < store.items.count ? launcherFG(store.items[idx]) : .white },
+            set: { if idx < store.items.count { store.items[idx].fgHex = $0.hexRGB } }
+        )
     }
 }
 

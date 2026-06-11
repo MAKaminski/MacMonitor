@@ -33,6 +33,12 @@ final class MessagesStore: ObservableObject {
     private var timer: Timer?
     private var started = false
 
+    /// Shared folder for the Craft handshake with a local Claude task. Lives in
+    /// the Cowork workspace so the task can read/write it with plain file tools.
+    static let craftDir = (NSHomeDirectory() as NSString)
+        .appendingPathComponent("Documents/Claude/Projects/Personal/craft-auto-response")
+    private var craftTimer: Timer?
+
     func start() {
         if !started { started = true; ContactsResolver.shared.load(); refresh() }
         timer?.invalidate()
@@ -98,54 +104,62 @@ final class MessagesStore: ObservableObject {
         }
     }
 
-    /// "Craft Auto Response" — sends the recent thread to Claude and fills the
-    /// draft field with a suggested reply. NEVER sends; the user reviews first.
-    /// Key: ~/.config/macmonitor/anthropic_key
+    /// "Craft Auto Response" — hands the recent thread to a LOCAL Claude
+    /// scheduled task (which can pull Michael's relationship + recent-work
+    /// context from memory) and drops the reply it writes back into the draft
+    /// field. NEVER sends; the user reviews first.
+    ///
+    /// Handshake: write request.json into the shared craft folder, then watch
+    /// for a response.json carrying the matching nonce. Trigger the
+    /// "MacMonitor Craft Auto Response" task in Claude to service the request.
     func craftReply() {
         guard let c = selected, !crafting else { return }
-        let keyPath = (NSHomeDirectory() as NSString)
-            .appendingPathComponent(".config/macmonitor/anthropic_key")
-        guard let key = (try? String(contentsOfFile: keyPath, encoding: .utf8))?
-                .trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
-            error = "Craft: paste an Anthropic API key into ~/.config/macmonitor/anthropic_key"
+        let dir = Self.craftDir
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let nonce = UUID().uuidString
+        let thread: [[String: Any]] = messages.suffix(14).map { ["fromMe": $0.fromMe, "text": $0.text] }
+        let request: [String: Any] = [
+            "nonce": nonce,
+            "status": "pending",
+            "createdAt": ISO8601DateFormatter().string(from: Date()),
+            "contact": c.name,
+            "guid": c.guid,
+            "instruction": "Draft Michael's next iMessage reply to \(c.name)'s most recent message. Use the relationship context and recent shared work you know from memory. Match Michael's texting voice: concise, warm, casual, no sign-off, no quotes. Return only the reply text.",
+            "messages": thread,
+        ]
+        let reqURL = URL(fileURLWithPath: dir).appendingPathComponent("request.json")
+        guard let data = try? JSONSerialization.data(withJSONObject: request, options: [.prettyPrinted]),
+              (try? data.write(to: reqURL)) != nil else {
+            error = "Craft: couldn't write the request file at \(dir)."
             return
         }
         crafting = true
-        let convo = messages.suffix(12)
-            .map { ($0.fromMe ? "Michael" : c.name) + ": " + $0.text }
-            .joined(separator: "\n")
-        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(key, forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        let body: [String: Any] = [
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 300,
-            "system": "You draft iMessage replies for Michael. Match his texting voice: concise, warm, casual. Return ONLY the reply text — no quotes, no preamble, no sign-off.",
-            "messages": [["role": "user",
-                          "content": "Conversation with \(c.name):\n\(convo)\n\nDraft Michael's next reply."]],
-        ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: req) { data, _, err in
-            DispatchQueue.main.async {
-                self.crafting = false
-                guard err == nil, let data,
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    self.error = "Craft failed: \(err?.localizedDescription ?? "no response")"
-                    return
-                }
-                if let text = ((obj["content"] as? [[String: Any]])?.first?["text"] as? String)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-                    self.suggestion = text
-                    self.error = nil
-                } else if let e = (obj["error"] as? [String: Any])?["message"] as? String {
-                    self.error = "Craft: \(e)"
-                } else {
-                    self.error = "Craft: empty response"
-                }
+        error = "Craft request queued — run the “MacMonitor Craft Auto Response” task in Claude; the reply will drop into the box."
+        let start = Date()
+        craftTimer?.invalidate()
+        craftTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
+            let respURL = URL(fileURLWithPath: MessagesStore.craftDir).appendingPathComponent("response.json")
+            if let d = try? Data(contentsOf: respURL),
+               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+               obj["nonce"] as? String == nonce,
+               let text = (obj["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty {
+                t.invalidate()
+                Task { @MainActor in self?.craftDidSucceed(text) }
+            } else if Date().timeIntervalSince(start) > 300 {
+                t.invalidate()
+                Task { @MainActor in self?.craftDidTimeout() }
             }
-        }.resume()
+        }
+    }
+
+    @MainActor private func craftDidSucceed(_ text: String) {
+        craftTimer?.invalidate(); craftTimer = nil
+        suggestion = text; crafting = false; error = nil
+    }
+    @MainActor private func craftDidTimeout() {
+        craftTimer?.invalidate(); craftTimer = nil; crafting = false
+        error = "Craft timed out — run the “MacMonitor Craft Auto Response” task in Claude, then click again."
     }
 
     // MARK: - SQLite (nonisolated; runs off-main)
@@ -392,7 +406,7 @@ struct MessagesTabView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color(red: 0.80, green: 0.47, blue: 0.36))   // Claude burnt orange (#CC785C)
                     .disabled(store.crafting)
-                    .help("Claude drafts a reply into the field — nothing is sent until you hit Send")
+                    .help("Queues a request for the local Claude task, which drafts a reply into the field using your relationship + recent-work context — nothing is sent until you hit Send")
                     Button("Send", action: sendDraft).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 .padding(8).background(Color(white: 0.10))
