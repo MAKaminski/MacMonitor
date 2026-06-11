@@ -1009,6 +1009,9 @@ final class LauncherStore: ObservableObject {
     }
     /// Transient: which group the editor's "Add" row should preselect (not persisted).
     @Published var editorPreselectGroup: String? = nil
+    /// The single launcher tile currently "armed" for drag-reorder — one total,
+    /// across every group. Not persisted.
+    @Published var armedID: UUID? = nil
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
@@ -1165,7 +1168,9 @@ struct LauncherTile: View {
                 RoundedRectangle(cornerRadius: 7)
                     .fill(armed ? Color.yellow : bg.opacity(0.85))
             )
+            .overlay { if armed { ArmedRainbowBorder(cornerRadius: 7) } }
             .overlay(alignment: .topLeading) {
+                // Badge sits ABOVE the armed rainbow border so it's never covered.
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 9, weight: .bold)).foregroundColor(.white)
@@ -1174,7 +1179,6 @@ struct LauncherTile: View {
                         .offset(x: -5, y: -5)
                 }
             }
-            .overlay { if armed { ArmedRainbowBorder(cornerRadius: 7) } }
             .scaleEffect(armed ? 1.12 : 1.0)
             .shadow(color: armed ? Color.yellow.opacity(0.9) : .clear, radius: armed ? 9 : 0)
             .zIndex(armed ? 1 : 0)
@@ -1335,7 +1339,6 @@ struct LauncherGroupView: View {
     @ObservedObject var badges = BadgeStore.shared
     let group: String
     private let cols = [GridItem(.adaptive(minimum: 72), spacing: 6)]
-    @State private var armedID: UUID? = nil
     @State private var frames:  [UUID: CGRect] = [:]
 
     var body: some View {
@@ -1370,7 +1373,7 @@ struct LauncherGroupView: View {
     private func tileCell(_ item: LauncherItem) -> some View {
         let pidx = store.items.firstIndex(where: { $0.id == item.id }) ?? 0
         LauncherTile(item: item, idx: pidx,
-                     armed: armedID == item.id,
+                     armed: store.armedID == item.id,
                      badge: badges.total(for: item) ?? 0)
             .background(GeometryReader { g in
                 Color.clear.preference(
@@ -1403,15 +1406,15 @@ struct LauncherGroupView: View {
             .onChanged { value in
                 switch value {
                 case .first(true):
-                    if armedID != item.id {
+                    if store.armedID != item.id {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
-                            armedID = item.id
+                            store.armedID = item.id
                         }
                     }
                 case .second(true, let drag?):
-                    if armedID == nil { armedID = item.id }
+                    if store.armedID == nil { store.armedID = item.id }
                     if let targetID = frames.first(where: { $0.value.contains(drag.location) })?.key,
-                       targetID != armedID {
+                       targetID != store.armedID {
                         moveArmed(to: targetID)
                     }
                 default:
@@ -1419,12 +1422,12 @@ struct LauncherGroupView: View {
                 }
             }
             .onEnded { _ in
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { armedID = nil }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { store.armedID = nil }
             }
     }
 
     private func moveArmed(to targetID: UUID) {
-        guard let armed = armedID,
+        guard let armed = store.armedID,
               let from = store.items.firstIndex(where: { $0.id == armed }),
               let to   = store.items.firstIndex(where: { $0.id == targetID }),
               from != to else { return }

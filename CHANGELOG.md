@@ -47,6 +47,9 @@ Dates: ISO 8601 (YYYY-MM-DD)
 - **WHATNOT tab no longer goes stale.** The LaunchAgent couldn't read the iCloud-hosted
   source spreadsheet (no Full Disk Access); the app now runs the producer itself at launch
   and every 15 minutes using its own FDA, then reloads the data.
+- **Launcher reorder polish.** Only one tile can be "armed" for dragging at a time across
+  all groups, and a tile's notification badge now draws on top of the armed rainbow border
+  instead of being clipped by it.
 
 ---
 
