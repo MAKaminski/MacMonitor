@@ -1062,11 +1062,13 @@ final class LauncherStore: ObservableObject {
         groups[i] = n
         for idx in items.indices where items[idx].group == old { items[idx].group = n }
     }
-    /// Remove a group; its buttons fall back to the first remaining group.
+    /// A group can be removed only once it's empty (and isn't the last group).
+    func canRemoveGroup(_ name: String) -> Bool {
+        groups.count > 1 && items(in: name).isEmpty
+    }
+    /// Remove an empty group (no-op if it still has buttons or is the last one).
     func removeGroup(_ name: String) {
-        guard groups.count > 1, let i = groups.firstIndex(of: name) else { return }
-        let fallback = groups.first(where: { $0 != name }) ?? "LAUNCHER"
-        for idx in items.indices where group(of: items[idx]) == name { items[idx].group = fallback }
+        guard canRemoveGroup(name), let i = groups.firstIndex(of: name) else { return }
         groups.remove(at: i)
     }
 
@@ -1356,8 +1358,10 @@ struct LauncherGroupView: View {
         }
         .contextMenu {
             Button("Add Group…") { AppDelegate.shared?.promptAddGroup() }
-            if store.groups.count > 1 {
+            if store.canRemoveGroup(group) {
                 Button("Remove Group “\(group)”") { store.removeGroup(group) }
+            } else if store.groups.count > 1 {
+                Button("Remove Group “\(group)” (empty it first)") { }.disabled(true)
             }
         }
     }
@@ -1453,10 +1457,18 @@ struct LauncherEditorView: View {
             HStack(spacing: 6) {
                 Text("Groups").font(.system(size: 10, weight: .semibold)).foregroundColor(.gray)
                 ForEach(store.groups, id: \.self) { g in
-                    Text(g)
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.22)))
+                    HStack(spacing: 3) {
+                        Text(g).font(.system(size: 10, weight: .semibold))
+                        if store.canRemoveGroup(g) {
+                            Button { store.removeGroup(g) } label: {
+                                Image(systemName: "xmark.circle.fill").font(.system(size: 9))
+                            }
+                            .buttonStyle(.plain).foregroundColor(.gray)
+                            .help("Remove this empty group")
+                        }
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.22)))
                 }
                 Button("＋ Group") { AppDelegate.shared?.promptAddGroup() }
                     .font(.system(size: 10))

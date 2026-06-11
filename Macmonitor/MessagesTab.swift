@@ -162,6 +162,111 @@ final class MessagesStore: ObservableObject {
         error = "Craft timed out — run the “MacMonitor Craft Auto Response” task in Claude, then click again."
     }
 
+    /// Right-click → Delete Conversation. Confirms, then deletes the thread in
+    /// Messages.app itself (so Messages-in-iCloud syncs the deletion to iPhone /
+    /// other Macs). Never touches Contacts — only the conversation is removed.
+    func confirmDeleteConversation(_ c: IMConversation) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete this conversation?"
+        alert.informativeText = "Removes the iMessage thread with “\(c.name)” from Messages on this Mac and — via Messages in iCloud — your iPhone and other devices. The contact is NOT deleted. This can't be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        runDeleteConversation(c)
+    }
+
+    private func runDeleteConversation(_ c: IMConversation) {
+        let esc = c.name
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        // Drive Messages.app via System Events: find the sidebar row whose text
+        // matches this conversation, select it, ⌘⌫, confirm the Delete sheet.
+        // Aborts safely if it can't find exactly one match (never guesses).
+        let script = """
+        set targetName to "\(esc)"
+        tell application "Messages" to activate
+        delay 0.5
+        tell application "System Events"
+            if not (exists process "Messages") then return "ERR Messages not running"
+            tell process "Messages"
+                set frontmost to true
+                delay 0.3
+                set theRows to {}
+                try
+                    set theRows to rows of table 1 of scroll area 1 of splitter group 1 of window 1
+                end try
+                if (count theRows) is 0 then
+                    try
+                        set theRows to rows of outline 1 of scroll area 1 of splitter group 1 of window 1
+                    end try
+                end if
+                if (count theRows) is 0 then return "ERR conversation list not found"
+                set hitRow to missing value
+                set hitCount to 0
+                repeat with r in theRows
+                    set rowText to ""
+                    try
+                        repeat with e in (entire contents of r)
+                            try
+                                if (role of e) is "AXStaticText" then set rowText to rowText & (value of e) & "  "
+                            end try
+                        end repeat
+                    end try
+                    if rowText contains targetName then
+                        set hitRow to r
+                        set hitCount to hitCount + 1
+                    end if
+                end repeat
+                if hitCount is 0 then return "ERR no match for: " & targetName
+                if hitCount > 1 then return "ERR multiple matches for: " & targetName
+                set selected of hitRow to true
+                delay 0.4
+                key code 51 using command down
+                delay 0.6
+                try
+                    click button "Delete" of sheet 1 of window 1
+                    return "OK"
+                end try
+                try
+                    click button "Delete" of sheet 1 of front window
+                    return "OK"
+                end try
+                return "ERR could not confirm the Delete sheet"
+            end tell
+        end tell
+        """
+        DispatchQueue.global().async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            proc.arguments = ["-e", script]
+            let outPipe = Pipe(); let errPipe = Pipe()
+            proc.standardOutput = outPipe
+            proc.standardError = errPipe
+            do { try proc.run() } catch {
+                DispatchQueue.main.async { self.error = "Delete: couldn't launch osascript: \(error.localizedDescription)" }
+                return
+            }
+            proc.waitUntilExit()
+            let out = (String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let err = (String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                if out == "OK" {
+                    self.error = nil
+                    if self.selected?.id == c.id { self.selected = nil; self.messages = [] }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.refresh() }
+                } else if !err.isEmpty {
+                    self.error = "Delete failed: \(err) — if it mentions assistive access, grant MacMonitor (and osascript) Accessibility in System Settings → Privacy & Security → Accessibility."
+                } else {
+                    self.error = "Delete: \(out.isEmpty ? "no response from Messages" : out)"
+                }
+            }
+        }
+    }
+
     // MARK: - SQLite (nonisolated; runs off-main)
 
     nonisolated private static func open(_ path: String) -> OpaquePointer? {
@@ -407,6 +512,11 @@ struct MessagesTabView: View {
                             .background(store.selected == c ? Color.white.opacity(0.10) : Color.clear)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Delete Conversation…", role: .destructive) {
+                                store.confirmDeleteConversation(c)
+                            }
+                        }
                     }
                 }
             }
