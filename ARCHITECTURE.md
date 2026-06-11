@@ -101,8 +101,14 @@ size. Tabs switch between the dashboard and a FileManager-backed directory explo
 embedded terminal runs each command via `Process` (`/bin/zsh -lc`) with streamed
 stdout/stderr and `cd`/`clear` built-ins, splittable to 4 panes — a command console, not a
 full TTY (a terminal-emulator dependency like SwiftTerm is the upgrade path). Launcher
-tiles persist as JSON in `UserDefaults` (`LauncherStore`); volume buttons drive AppleScript
-`set volume output volume`. One design note: everything lives in `AppDelegate.swift` by
+tiles persist as JSON in `UserDefaults` (`LauncherStore`): each `LauncherItem` carries an
+optional group plus background (`bgHex`) and text (`fgHex`) colors, and the ordered group
+list lives under `hudLauncherGroups`. The HUD renders one collapsible `LauncherGroupView`
+per group, each in its own coordinate space so a long-press (~1.5 s) + drag reorders within
+that group (yellow + revolving-rainbow "armed" highlight, cleared on release); the editor
+offers the same reorder via a `List`/`.onMove` ≡ drag handle. Both views mutate the single
+shared `LauncherStore.items`, so editor and HUD stay in sync. Volume buttons drive
+AppleScript `set volume output volume`. One design note: everything lives in `AppDelegate.swift` by
 choice — adding source files to the Xcode target would require pbxproj edits, which this
 fork's CLI-driven workflow avoids.
 
@@ -145,9 +151,9 @@ flowchart LR
 
 ---
 
-## HUD tabs & data sources (2.3.0)
+## HUD tabs & data sources (2.5.0)
 
-The adaptive HUD (`AdaptiveHUDView` in `AppDelegate.swift`) hosts six tabs, each
+The adaptive HUD (`AdaptiveHUDView` in `AppDelegate.swift`) hosts ten tabs, each
 backed by its own store:
 
 | Tab | View / store | Source |
@@ -156,8 +162,12 @@ backed by its own store:
 | FILES | file browser | working directory |
 | FIN | `FinanceStore` | M1 GraphQL poller → countdown / daily P-L |
 | CHARTS | `ChartsView` | ring buffers of metric history (1 s … 1 mo) |
+| CAL | `CalendarTab` | Google + Outlook events (next 7 days) |
+| MONARCH | `MonarchTab` | Monarch Money session (cookie + 1Password-token pollers) |
+| WHATNOT | `WhatnotStore` / `WhatnotTab` | `~/.config/macmonitor/whatnot.json` (producer run in-process — see below) |
 | OURA | `OuraService` / `OuraTab` | Oura API v2 (`~/.config/oura/token`) |
-| iMSG | `MessagesStore` / `ContactsResolver` | `~/Library/Messages/chat.db` + Contacts |
+| iMSG | `MessagesStore` / `ContactsResolver` | `~/Library/Messages/chat.db` + Contacts (1:1 **and group-thread participant names**) |
+| CLAUDE | `ClaudeChatStore` / `ClaudeTab` | local Claude task bridge (see below) |
 
 ### Badge pipeline (decoupled producer → consumer)
 
@@ -192,3 +202,34 @@ consent prompt while it remains an accessory. Two workarounds are in play:
   `/usr/bin/osascript` process, which surfaces the consent prompt.
 - **Contacts:** flip `NSApp.activationPolicy` to `.regular` + `activate` for the
   first `CNContactStore.requestAccess`, then revert to `.accessory`.
+
+### Local Claude task bridges (Craft Auto Response + CLAUDE tab)
+
+Two features hand work to **ad-hoc local Claude scheduled tasks** instead of calling the
+Anthropic API in-process — so each tracks usage independently and can draft using the user's
+own memory/context. Both use the same file handshake under
+`~/Documents/Claude/Projects/Personal/` (chosen so the task can reach it with plain file
+tools, no Full Disk Access required):
+
+| Feature | Folder | Task | Trigger |
+|---|---|---|---|
+| iMSG **Craft Auto Response** (`MessagesStore.craftReply`) | `craft-auto-response/` | `macmonitor-craft-auto-response` | manual |
+| **CLAUDE** tab (`ClaudeChatStore.send`) | `claude-agent-bridge/` | `macmonitor-claude-agent` | manual |
+
+Flow: the app writes `request.json` (`{ nonce, status:"pending", … }`) and polls (2 s, 5-min
+timeout) for a `response.json` carrying the **same nonce**. The task drafts the reply, writes
+`response.json`, and marks the request `done`. The app then drops the result into the
+iMessage draft box (Craft — **never auto-sends**) or appends it to the agent thread (CLAUDE
+tab). No Anthropic API key is needed in-app; the old `~/.config/macmonitor/anthropic_key`
+path is retired for these two features.
+
+### Whatnot producer — run in-process
+
+The `whatnot-service` producer reads a source spreadsheet in **iCloud Drive**, which the
+`de.modularequity.macmonitor.whatnot` LaunchAgent cannot read (launchd jobs lack Full Disk
+Access → `Errno 1: Operation not permitted`, so the data went stale). MacMonitor already
+holds FDA (it reads `chat.db`), so `WhatnotStore.start()` — kicked at launch from
+`applicationDidFinishLaunching` — runs the producer itself (`python3 -m whatnot_service.cli`,
+spawned via `Process`) on launch and every 15 minutes, then reloads `whatnot.json`. The
+standalone LaunchAgent is now redundant. This is the same "app has the permission, so the app
+does the work" pattern used for Messages send/Contacts.

@@ -7,6 +7,41 @@ Dates: ISO 8601 (YYYY-MM-DD)
 
 ---
 
+## [2.5.0] — 2026-06-11
+
+### Added
+
+- **Launcher groups.** Buttons organize into user-defined groups, each a collapsible
+  HUD section. Add / remove groups via the **+** editor or right-click (**Add Group**);
+  move a button with right-click **Change Group** (current group greyed out so the sort
+  order never shuffles).
+- **Per-button colors.** Each launcher button has its own background (primary) and text
+  (secondary) color, set with a color wheel / RGB picker in the editor and persisted as hex.
+- **Hold-to-reorder.** Hold a HUD launcher tile ~1.5 s to pick it up (yellow highlight +
+  revolving rainbow border); drag to reorder within its group — neighbors slide aside and it
+  snaps into place on release.
+- **Editor drag handles.** The launcher editor is scrollable (no fixed button cap), with a
+  ≡ handle on each row to drag-reorder; changes mirror live to the HUD.
+
+### Changed
+
+- **Craft Auto Response** now routes through an ad-hoc local Claude task
+  (`macmonitor-craft-auto-response`) via a request/response file bridge, drafting with
+  relationship + recent-work context from memory instead of a context-less API call. It
+  still only fills the iMessage draft — never sends.
+- **CLAUDE tab** routes through a separate ad-hoc local task (`macmonitor-claude-agent`) so
+  its usage tracks independently. Neither feature needs an in-app Anthropic API key anymore.
+
+### Fixed
+
+- **iMessage group threads** now show participant names (e.g. "Keith, Lamar & Naomi")
+  instead of raw `chatNNN…` identifiers.
+- **WHATNOT tab no longer goes stale.** The LaunchAgent couldn't read the iCloud-hosted
+  source spreadsheet (no Full Disk Access); the app now runs the producer itself at launch
+  and every 15 minutes using its own FDA, then reloads the data.
+
+---
+
 ## [2.4.0] — 2026-06-06
 
 ### Added
